@@ -1,6 +1,5 @@
 # Project: Wildebeest
 # Description: Introduction to Animal Movement Analyses using wildebeest dataset as a template  
-#               There's lots we could do here.  I'd like to start with meeting class objectives, but would eventually be interested in simulating animal movement based on iSSF model (new to me)
 # Author: Jared Stabach and Majaliwa Masolele
 # Date: 11-Mar-2021
 
@@ -22,7 +21,10 @@
 
 # I am going to put all of this in a Markdown document as it develops and will credit you for your assistance
 
-# Remove anything in memory
+# ************************************************************
+# ************************************************************
+
+# Remove everything from memory
 rm(list=ls())
 
 # Load Libraries
@@ -30,21 +32,55 @@ library(ctmm)
 library(lubridate)
 library(dplyr)
 library(raster)
+library(proj4)
+library(adehabitatLT)
+library(sp)
+library(amt)
 
-# Load directly if dataset is ready from Movebank
-# Ex. yourAnimals <- as.telemetry("yourAnimalsMoveBank.csv")
+# Load and Clean Data
+# ************************************************************
+# ************************************************************
 
-# Read in file downloaded from Movebank to correct column issues (timestamp)
+# In this example, we will use a dataset that I collected during my PhD research.  Data are freely available on Movebank:
+# Stabach JA, Hughey LF, Reid RS, Worden JS, Leimgruber P, Boone RB (2020) Data from: Comparison of movement strategies of three populations of white-bearded wildebeest. Movebank Data Repository. doi:10.5441/001/1.h0t27719
+
+# Do NOT open the file in Excel before loading it into R.  Excel will mess up the time stamp column and set it to the time on your computer, not what you want for most studies 
 wild <- read.csv("./Data/White-bearded wildebeest in Kenya.csv", header=TRUE)
 head(wild)
+str(wild)
 
-# Must fix the time, first by correcting the time in the Excel file
+# Set TimeZone
+# https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+TimeZone <- "Africa/Nairobi"
+
+# Note that I am overwriting the timestamp field here (UTC)
+wild$timestamp <- as.POSIXct(wild$study.local.timestamp, format = "%Y-%m-%d %H:%M:%S", tz=TimeZone)
+
+# Check your attributes
+# It is essential that you are certain of your time zone
+attr(wild$timestamp, "tzone")
+
+# Note, you could have also taken the UTC time, created a POSIXct object and then converted to local time
+# wild$timestamp <- as.POSIXct(wild$timestamp, format = "%Y-%m-%d %H:%M:%S", tz="UTC")
+# wild$timestamp <- with_tz(wild$timestamp, "Africa/Nairobi")
+
+# The lubridate has a number of useful functions for time, especially when reading data from a file when your system will assume a certain timezone.
+# force_tz changes the time zone without changing the clock time.
+
+# See also some of the manipulations you can do to your time stamp, especially when it is a character field
+# I would recommend always specifying your TimeZone
+#wild$test <- ymd_hms(wild$study.local.timestamp, tz = TimeZone)
+#wild  <- wild %>% mutate(test = ymd_hms(study.local.timestamp, tz = TimeZone)) # Could use mutate to get the same result
+
+# Movebank helps in resolving these issues because it standardizes the columns and formats.
+
+# I had to first open the file in Excel to  Must fix the time, first by correcting the time in the Excel file
 # I then needed to set the format of the time to POSIXct using lubridate
 # Find the function that matches the format of your data
-wild$timestamp <- mdy_hm(wild$study.local.timestamp)
-#wild  <- wild %>% mutate(timestamp = mdy_hm(study.local.timestamp)) # Could use mutate to get the same result
-head(wild)
-str(wild)
+
+
+# There are extra columns in the data frame that we can immediately remove.  Not absolutely necessary to do, but helpful to simplify the dataset.
+
 
 # Create ID field and Re-arrange Columns
 wild <- wild[,c(3:9,11,13:14,16:19)]
