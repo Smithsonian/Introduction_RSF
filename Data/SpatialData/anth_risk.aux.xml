@@ -1,14 +1,3 @@
-<PAMDataset>
-  <Metadata>
-    <MDI key="DataType">Generic</MDI>
-  </Metadata>
-  <Metadata domain="Esri">
-    <MDI key="PyramidResamplingType">NEAREST</MDI>
-  </Metadata>
-  <PAMRasterBand band="1">
-    <Description>anth_risk</Description>
-    <Metadata>
-      <MDI key="RepresentationType">ATHEMATIC</MDI>
-    </Metadata>
-  </PAMRasterBand>
-</PAMDataset>
+version https://git-lfs.github.com/spec/v1
+oid sha256:1550669f8cc62d3610a6e7f9dc749ccec1becd15225cce2b12bf3134a0cd7271
+size 354

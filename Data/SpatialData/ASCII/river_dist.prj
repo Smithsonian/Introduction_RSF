@@ -1,8 +1,3 @@
-Projection    UTM
-Zone          36
-Datum         WGS84
-Spheroid      WGS84
-Units         METERS
-Zunits        NO
-Yshift        10000000.0
-Parameters    
+version https://git-lfs.github.com/spec/v1
+oid sha256:000b6eee6f553e6c3f91db37acaf58700d75f003652abb9d4b25fc7368389904
+size 161
