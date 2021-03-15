@@ -19,8 +19,6 @@
 #     Perhaps move to SSF (conditional logistic regression) or even iSSF, but I view this as much more advanced
 #5. Animate Movements - I have code for this
 
-# I am going to put all of this in a Markdown document as it develops and will credit you for your assistance
-
 # ************************************************************
 # ************************************************************
 
@@ -44,7 +42,7 @@ library(amt)
 # In this example, we will use a dataset that I collected during my PhD research.  Data are freely available on Movebank:
 # Stabach JA, Hughey LF, Reid RS, Worden JS, Leimgruber P, Boone RB (2020) Data from: Comparison of movement strategies of three populations of white-bearded wildebeest. Movebank Data Repository. doi:10.5441/001/1.h0t27719
 
-# Do NOT open the file in Excel before loading it into R.  Excel will mess up the time stamp column and set it to the time on your computer, not what you want for most studies 
+# Do NOT open the file in Excel before loading it into R.  Excel will mess up the time stamp column and set it to the time on your computer, not what you want for most studies.  This could be particularly important (erroneus) if you are interested in diurnal or nocturnal activity.
 wild <- read.csv("./Data/White-bearded wildebeest in Kenya.csv", header=TRUE)
 head(wild)
 str(wild)
@@ -54,6 +52,8 @@ str(wild)
 TimeZone <- "Africa/Nairobi"
 
 # Note that I am overwriting the timestamp field here (UTC)
+# See the R documentation on time formats, from the strptime library
+# https://www.rdocumentation.org/packages/base/versions/3.3/topics/strptime
 wild$timestamp <- as.POSIXct(wild$study.local.timestamp, format = "%Y-%m-%d %H:%M:%S", tz=TimeZone)
 
 # Check your attributes
@@ -62,24 +62,34 @@ attr(wild$timestamp, "tzone")
 
 # Note, you could have also taken the UTC time, created a POSIXct object and then converted to local time
 # wild$timestamp <- as.POSIXct(wild$timestamp, format = "%Y-%m-%d %H:%M:%S", tz="UTC")
+# attr(wild$timestamp, "tzone")
 # wild$timestamp <- with_tz(wild$timestamp, "Africa/Nairobi")
+# attr(wild$timestamp, "tzone")
 
-# The lubridate has a number of useful functions for time, especially when reading data from a file when your system will assume a certain timezone.
+# The lubridate package has a number of useful functions for time, especially when reading data from a file when your system will assume a certain timezone.
 # force_tz changes the time zone without changing the clock time.
 
 # See also some of the manipulations you can do to your time stamp, especially when it is a character field
-# I would recommend always specifying your TimeZone
 #wild$test <- ymd_hms(wild$study.local.timestamp, tz = TimeZone)
 #wild  <- wild %>% mutate(test = ymd_hms(study.local.timestamp, tz = TimeZone)) # Could use mutate to get the same result
 
-# Movebank helps in resolving these issues because it standardizes the columns and formats.
+# Your date and time may also be in two different fields.  In those, cases, you need to append them together.
+# You can use the paste0 command or use lubridate
+#day <- c("2021-03-15", "2021-03-16", "2021-03-17", "2021-03-18", "2021-03-19")
+#time <- c("06:02:01", "09:01:00", "12:00:00", "15:03:00", "18:01:01")
+#test.data <- cbind.data.frame(day,time)
+#test.data$timestamp <- as.POSIXct(paste0(test.data$day," ",
+#                                         test.data$time), 
+#                                  format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
+#test.data$timestamp2 <- as.POSIXct(lubridate::ymd(test.data$day) +
+#                      lubridate::hms(test.data$time), tz = "UTC")
+#See lubridate for additional options
+#https://cran.r-project.org/web/packages/lubridate/lubridate.pdf
 
-# I had to first open the file in Excel to  Must fix the time, first by correcting the time in the Excel file
-# I then needed to set the format of the time to POSIXct using lubridate
-# Find the function that matches the format of your data
-
-
-# There are extra columns in the data frame that we can immediately remove.  Not absolutely necessary to do, but helpful to simplify the dataset.
+# ******************
+# ******************
+# Remove extra columsn
+# Not absolutely necessary to do, but helpful to simplify the dataset.
 
 
 # Create ID field and Re-arrange Columns
