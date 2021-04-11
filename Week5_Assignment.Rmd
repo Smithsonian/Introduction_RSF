@@ -1,0 +1,193 @@
+---
+title: "Essentials of Spatial Ecology: GIS Analysis in R"
+author: "Week 5 Assignment - Introduction to Animal Movement Analyses"
+date: "Due: Saturday, April 17 2021 at 11:59 pm EDT"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Description
+In this week's assignment, you'll follow instructions provided in class to model the occurrence of dorcas gazelle (*Gazelle dorcas*).  More widely distributed across the sahara desert than addax (*Addax nasomaculatus*), dorcas gazelle are susceptible to displacement from pastoral land uses and are assumed to be in rapid decline due to poaching and disturbance from oil exploration activities. Sightings of dorcas gazelle were recorded simultaneously with ground-based surveys to record addax occurrence. Your goal in this assignment is to re-analyze the dataset provided in class, with a goal of evaluating how dorcas gazelle use habitat in relation to addax. 
+
+Objectives of this exercise are to improve your skills working with spatial objects to fit a logistic regression model to the data and provide a raster prediction of dorcas gazelle occurrence. Importantly, you will need to assess model assumptions, graph response curves, and evaluate model coefficients.  
+
+Please don't hesitate to ask questions or to offer help to others on the Blackboard discussion board. We expect everyone to submit an independent project, but there is no problem with providing assistance to others. Part of what we hope to facilitate with this class is a new community of researchers for you to interact with and learn from. Please upload a WORD document answering the question below, along with your annotated [R]() script. Both documents should be posted to the relevant assignment in [Blackboard](https://mymasonportal.gmu.edu/).
+
+# Datasets
+All datasets required to complete this homework are included in the "`Week4_Homework_Data.Rdata`" file on [Blackboard](), within the Week4/Data directory.  The files in this data file include:
+
+* A spatial points data frame, named `Occ.Hmk`, which includes the occurrence of dorcas gazelle (i.e., `obsDorcas`)
+* Raster files (2 files total) of ndvi (`ndvi`) and surface roughness (`rough`).
+
+You'll need the following libraries to complete this assignment:
+
+```{r Libraries Require, eval=T, echo=T, message=F, warning=F}
+library(arm)
+library(DAAG)
+library(dplyr)
+library(lubridate)
+library(pROC)
+library(rgdal)
+library(usdm)
+library(visreg)
+```
+
+# Assignment
+Load the `Week4_Homework_Data.Rdata` file into [R]().
+
+```{r Load, eval=T, echo=T}
+load(file = "./Data/Week4_Homework_Data.Rdata")
+```
+
+You should now see three files in your working environment:
+
+* Occ.Hmk - Spatial Points DataFrame
+* ndvi - Raster Layer
+* rough - Raster Layer
+
+**Question 1**: Are all files in the same coordinate reference system?  If no, reproject the file(s) to UTM Zone 32 North, WGS84.
+
+```{r Reproject, eval=T, echo=T}
+# Look at the file details
+Occ.Hmk
+ndvi
+rough
+
+#Occ.Hmk is in lat/long.  Must reproject
+UTM32N.proj <- "+proj=utm +zone=32 +ellps=WGS84 +units=m +no_defs"
+Occ.Hmk <- spTransform(Occ.Hmk,UTM32N.proj)
+Occ.Hmk
+```
+
+Convert `Occ.Hmk` to a dataframe (Occ.Hmk <- as.data.frame(Occ.Hmk)). 
+
+```{r Convert, eval=T, echo=T}
+# Convert to a dataframe
+Occ.Hmk <- as.data.frame(Occ.Hmk)
+#str(Occ.Hmk)
+#head(Occ.Hmk)
+```
+
+Now, follow the instructions from Thursday, except fit a model with `obsDorcas` as your dependent/response variable. Make sure to scale your continuous variables before proceeding.  Don't forget to change the independent variable `sDorcas` in your model.  
+
+Answer the following questions;
+
+```{r Scale, eval=T, echo=T}
+# Scale the continuous variables
+Occ.Hmk <- Occ.Hmk %>% mutate(
+  sHuman = as.numeric(scale(Human)),
+  sndvi = as.numeric(scale(ndvi)),
+  srough = as.numeric(scale(rough)),
+  sDorcas = as.numeric(scale(Dorcas)),
+  sAddax = as.numeric(scale(Addax))
+)
+
+# Scale the raster layers
+s.ndvi <- (ndvi - mean(Occ.Hmk$ndvi)) / sd(Occ.Hmk$ndvi)
+s.rough <- (rough - mean(Occ.Hmk$rough)) / sd(Occ.Hmk$rough)
+
+# Plot to look at
+par(mfrow=c(2,2))
+plot(ndvi, main = "Non-Scaled NDVI");plot(s.ndvi, main = "Scaled NDVI");plot(rough, main = "Non-Scaled Rough");plot(s.rough, main = "Scaled Rough")
+par(mfrow=c(1,1))
+```
+
+**Question 2**: Are any of the variables collinear?  
+
+```{r Collinear, eval=T, echo=T}
+# Any problems?
+#head(Occ.Hmk)
+vifstep(Occ.Hmk[,24:28])
+# No problems.  Looking good.
+```
+
+```{r Model, eval=T, echo=T}
+# Create a full model with all the variables that predict dorcas occurrence
+glm.Dorcas <- glm(obsDorcas ~ srough + I(srough^2) + sndvi + I(sndvi^2) + sHuman + sAddax + Stipa1 + Stipa2 + Cornul + Season + Year, 
+                 data = Occ.Hmk, 
+                 family = binomial(link="logit"))
+# Summarize result
+summary(glm.Dorcas)
+
+glm.Dorcas$deviance/glm.Dorcas$df.residual
+# No obvious problems.  Looking okay
+```
+
+**Question 3**: What variables are important in predicting Dorcas gazelle occurrence?  Are these variables similar or different than the model we generated for addax?  Which variables are significantly positive or negative?  
+
+```{r Plot, eval=T, echo=T}
+# Plot the coefficients
+coefplot(glm.Dorcas,
+        plot=TRUE,
+        mar=c(1,4,5.1,2),
+        intercept=FALSE,
+        vertical=TRUE,
+        main="",
+        var.las=1,
+        frame.plot=FALSE)
+# Reset plotting
+par(mar=c(5,4,4,2)+0.1)
+
+# The Response in year is very different with Dorcas.  In comparison to Year 2008, Years 2011, 2012, and 2013 overlap 0 (no statistical difference).  Surveyors were more likely to record Dorcas in years 2009, 2010, and 2014 -> in comparison to 2008
+# Less likely to observe dorcas in Wet or Dry season
+# Negative response to Cornul
+# Postive response to Stipa2 and 1
+# Negative reponse to Human disturbance.
+# Response to NDVI and roughness harder to interpret...but significant.  Need to plot response curves.
+
+par(mfrow=c(1,2))
+visreg(glm.Dorcas,"srough",
+       scale="response", 
+       ylab="Prob", 
+       partial=TRUE, 
+       line=list(col="blue"), 
+       fill=list(col="gray"),
+       points=list(col="black",cex=0.25,pch=19),
+       ylim=c(0,1))
+visreg(glm.Dorcas,"sndvi",
+       scale="response", 
+       ylab="Prob", 
+       partial=TRUE, 
+       line=list(col="blue"), 
+       fill=list(col="gray"),
+       points=list(col="black",cex=0.25,pch=19),
+       ylim=c(0,1))
+
+# Super cool.  Much stronger responses in this model to surface roughness and ndvi (Lot's more data on the occurrence on dorcas gazelle).  Increase in occurrence probability at high levels of ndvi.  U-shaped response to surface roughness (open area and very rough areas, perhaps).
+```
+
+**Question 4**: Is your model any good?  What statistics could you provide about the predictive power of the model?
+
+```{r AUC, echo=T, eval=T}
+# Calculate AUC
+predpr <- predict(glm.Dorcas, type=c("response"))
+(roccurve <- roc(Occ.Hmk$obsDorcas ~ predpr))
+plot(roccurve, main="AUC")
+
+# Calculate cross-validation statistic
+cv.binary(glm.Dorcas)
+```
+
+**Question 5**: Visually, do Dorcas gazelle tend to use the same areas as Addax (use both rasters and their quadratics for this prediction)?
+
+```{r GLM2, eval=T, echo=T}
+glm.Dorcas2 <- glm(obsDorcas ~ srough + I(srough^2) + sndvi + I(sndvi^2), 
+                  data = Occ.Hmk, 
+                  family = binomial(link="logit"))
+
+# Summarize and print confidence intervals
+summary(glm.Dorcas2)
+
+# Add to brick and rename layer names
+satImage <- brick(s.rough, s.ndvi) # Use brick here, rather than stack to create a single, multi-layer file
+names(satImage) <- c("srough", "sndvi")
+
+# Predict and export image to directory
+Dorcas.predict <- predict(satImage, glm.Dorcas2, type="response", progress='text')
+
+# Plot result
+plot(Dorcas.predict)
+```

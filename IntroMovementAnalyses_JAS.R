@@ -22,94 +22,104 @@
 # ************************************************************
 # ************************************************************
 
-# In this example, we will use a dataset that I collected during my PhD research.  Data are freely available on Movebank:
-# Stabach JA, Hughey LF, Reid RS, Worden JS, Leimgruber P, Boone RB (2020) Data from: Comparison of movement strategies of three populations of white-bearded wildebeest. Movebank Data Repository. doi:10.5441/001/1.h0t27719
+# We will now explore two different packages for analyzing animal movement data (adehabitat and amt).  We will start with visualizing the movement data, providing summary statistics, and initial graphs that can help to generate research questions.  
+# We will then move onto RSF analyses and home range
 
 # ************************************************************
 # ************************************************************
 
-# Remove everything from memory
-rm(list=ls())
+# Important for our discussion is projecting the geographic data included in the datafile.  Note the difference between defining your projection and projecting to a new coordinate system.  Review Crego lecture for further details
 
-# Load Libraries
-library(ctmm)
-library(lubridate)
-library(dplyr)
-library(raster)
-library(proj4)
-library(adehabitatLT)
-library(sp)
-library(amt)
+# The best website to obtain Coordinate Reference System information is:
+# https://spatialreference.org/
 
-# Load and Clean Data
-# ************************************************************
-# ************************************************************
+# Here, you can search for your coordinate system information and find the appropriate text required by R.
+# ArcGIS or QGIS can also be used to help you define the parameters you are looking for (EPSG)
 
-# NOTE: Do NOT open the file in Excel before loading it into R.  Excel will mess up the time stamp column and set it to the time on your computer, not what you want for most studies.  This could be particularly important (erroneus) if you are interested in diurnal or nocturnal activity.
+# In this case, we have Geographic Coordinate information (Lat/Long).  We will ignore the UTM data included in the file, because many of your datasets won't include this information.  Starting with Geographic coordinates will ensure that you have correctly annotated your dataset.
 
-wild <- read.csv("./Data/White-bearded wildebeest in Kenya.csv", header=TRUE)
+# Projection information
+LatLong.proj <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"  # EPSG:4326
+UTM36s.proj <- "+proj=utm +zone=36 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs" # EPSG:32736
 
-# This file was downloaded from Movebank, following procedures detailed during our class period.  Various datasets can be downloaded from Movebank, providing standardized field names that we will follow here.
+# In this case, we want to take Geographic data (Lat/Long) and "Project" to UTM 36S
+# Create Matrix of positions
+# In this case, the dataset already contains projected coordinates, so we could have used those.
+wild.dd <- as.matrix(cbind(wild$location.long, wild$location.lat))
+xy <- project(wild.dd, UTM36s.proj)
 
-# Look at the data and examine the data structure
-head(wild)
-str(wild)
+# Calculate animal trajectories
+temp.traj <-as.ltraj(xy, wild$timestamp, id = wild$id, infolocs = wild[,1:ncol(wild)], typeII = TRUE, slsp = c("remove"))
 
-# Dates
-# ************************************************************
-# ************************************************************
+summary(temp.traj)
+temp.traj
 
-# It's essential that you properly format your dates and include the time zone
-# Here, we will change the timesamp from UTC to EAT
-Timezone1 <- "UTC" #Default
-Timezone2 <- "Africa/Nairobi" 
+# Note that this does not account for NA values
+refda <- min(wild$timestamp)
+refda <- strptime("00:00", "%H:%M", tz = Timezone2)
+                              # or just "2010-05-30"
+interval <- 3 # hour.  This is tricky because the data are 1 hour during the day and 3 hours at night
 
-# Look at the timestamp
-wild$timestamp[1:50]
+# These data are tricky because the fix interval is 1 hour during the day and 3 hours at night
+# We need to set the missing values to NA
+traj2 <- setNA(temp.traj, refda, tol = dt/10, dt = interval, units = "hour")
+plotltr(traj2, "dt/3600")
+is.regular(traj2)
 
-wild$timestamp <- as.POSIXct(wild$timestamp, format = "%Y-%m-%d %H:%M:%S", tz=Timezone1)
-attr(wild$timestamp, "tzone")
-wild$timestamp <- with_tz(wild$timestamp, tz=Timezone2)
+## dt is nearly regular: round the date:
+# Many of the functions in adehabitat require regular trajectories, to do so, use the sett0 function
+traj2b <- sett0(traj2, refda, interval, units = "hour") 
+plotltr(traj2b, "dt/3600")
+is.regular(traj2b)
 
-# Look at the timestamp
-wild$timestamp[1:50]
+# Summarize trajectory
+(Summary.traj <- summary(traj2))
 
-# Note that I have overwritten the timestamp field here, recorded in UTC
-# Other timezones can be found at https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-# See the R documentation on time formats, from the strptime library
-# https://www.rdocumentation.org/packages/base/versions/3.3/topics/strptime
+# Summarize the completeness of the dataset
+Summary.traj$DaysTrack <- signif(difftime(Summary.traj$date.end,Summary.traj$date.begin, units="days"),digits=2)
+Summary.traj$Records <- Summary.traj$nb.reloc-Summary.traj$NAs
+Summary.traj$PctComplete <- signif((Summary.traj$nb.reloc-Summary.traj$NAs)/Summary.traj$nb.reloc*100,digits=4)
 
-# Check your attributes
-attr(wild$timestamp, "tzone")
+# Convert to a dataframe 
+Data.Traj <-ld(traj2)
 
-# Note, you could have also taken the UTC time, created a POSIXct object and then converted to local time
-# wild$timestamp <- as.POSIXct(wild$timestamp, format = "%Y-%m-%d %H:%M:%S", tz="UTC")
-# attr(wild$timestamp, "tzone")
-# wild$timestamp <- with_tz(wild$timestamp, "Africa/Nairobi")
-# attr(wild$timestamp, "tzone")
+# Plot trajectories
+plot(traj2)
 
-# The lubridate package has a number of useful functions for time, especially when reading data from a file when your system will assume a certain timezone.
-# force_tz changes the time zone without changing the clock time.
 
-# See also some of the manipulations you can do to your time stamp, especially when it is a character field
-#wild$test <- ymd_hms(wild$study.local.timestamp, tz = TimeZone)
-#wild  <- wild %>% mutate(test = ymd_hms(study.local.timestamp, tz = TimeZone)) # Could use mutate to get the same result
 
-# Your date and time may also be in two different fields.  In those, cases, you need to append them together.
-# You can use the paste0 command or use lubridate
-#day <- c("2021-03-15", "2021-03-16", "2021-03-17", "2021-03-18", "2021-03-19")
-#time <- c("06:02:01", "09:01:00", "12:00:00", "15:03:00", "18:01:01")
-#test.data <- cbind.data.frame(day,time)
-#test.data$timestamp <- as.POSIXct(paste0(test.data$day," ",
-#                                         test.data$time), 
-#                                  format = "%Y-%m-%d %H:%M:%S", tz = "UTC")
-#test.data$timestamp2 <- as.POSIXct(lubridate::ymd(test.data$day) +
-#                      lubridate::hms(test.data$time), tz = "UTC")
-#See lubridate for additional options
-#https://cran.r-project.org/web/packages/lubridate/lubridate.pdf
+# Export date to shapefile
+# **************************
+# **************************
+wild.2829.export <- SpatialPointsDataFrame(coords = xy, data = wild.2829, proj4string = CRS(UTM36s.proj))
+writeOGR(obj = wild.2829.export, dsn = "Output", layer = "Wild2829_UTM36S", driver = "ESRI Shapefile", overwrite_layer = T)
 
-# ************************************************************
-# ************************************************************
+
+
+
+
+
+
+# A note on projections.....I am not projecting the data here.  Instead, I am simply defining the projection.  For this projection (UTM36S, WGS84), this could also be specified as:
+# sp::CRS("+proj=utm +zone=36 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs"))
+# Make sure you understand the difference between "Defining your coordinate system" and "Projecting to a New coordinate System"
+
+
+# Create a month field
+wild2b$month <- month(wild2b$timestamp)
+
+# This dataset is already projected, so we can calculate tracks
+tr1 <- make_track(wild2b, utm.easting, utm.northing, timestamp, id = id, name = individual.local.identifier, month = month, crs = sp::CRS("+init=epsg:32736"))
+
+
+
+
+
+
+
+
+
+
 
 # All of this could be completed using piping
 
@@ -134,64 +144,6 @@ stps <- track_resample(wild1, rate = minutes(10), tolerance = seconds(60)) %>%
                           time_of_day(include.crepuscule = FALSE)
 str(stps)  
 
-# ******************
-# ******************
-# Remove extra columsn
-# Not absolutely necessary to do, but helpful to simplify the dataset.
-
-
-# Create ID field and Re-arrange Columns
-wild <- wild[,c(3:9,11,13:14,16:19)]
-
-# Create an id field (some function use the tag.local.identified, so we'll keep that)
-wild <- wild %>% 
-  mutate(id = tag.local.identifier) %>% 
-  relocate(id)
-
-head(wild)
-
-# Let's bring in another table with some ancillary data
-# ******************************************************
-wild.Anc <- read.csv("Data/Wildebeest_Ancillary.csv",header=T)
-
-wild.Anc$Start.Date <- dmy(wild.Anc$Start.Date)
-wild.Anc$End.Date <- dmy(wild.Anc$End.Date)
-wild2 <- merge(wild,wild.Anc, by.x = "id", by.y = "ID")
-
-# Subset or filter Mara animals
-wild2 <- subset(wild, Study.Area == "Mara")
-
-# Also see Amboseli Basin or Athi-Kaputiei Plains sub-regions. Potentially useful for student projects
-unique(wild2$Study.Area)
-
-# Let's choose 1 animals
-wild2b <- subset(wild2, id == 2829)
-
-# Same as
-#wild2c <- wild2 %>%
-#  filter(id == 2829)
-
-# ********************
-# ********************
-
-# Determine if any missing data
-if(all(complete.cases(wild2b)) == T){print("ALL Looking Good")} else {print("Dallas, we have a problem")}
-
-# My main concern, however, is the Lat/Long field.  I will accept other fields being blank, as long as these fields are not blank
-nrow(wild2b)
-wild2b <- wild2b[complete.cases(wild2b[,c("location.lat","location.long","timestamp")]),]
-# Or just query the entire dataset wild2b <- wild2b[complete.cases(wild2b),]
-nrow(wild2b) # Not expecting any loss in rows, since above statement was true
-
-# With GPS data, we have to be especially careful about duplicate timestamps.
-any(duplicated(wild2b$timestamp))
-wild2b <- wild2b[!duplicated(wild2b$timestamp), ]
-
-# Create a month field
-wild2b$month <- month(wild2b$timestamp)
-
-# This dataset is already projected, so we can calculate tracks
-tr1 <- make_track(wild2b, utm.easting, utm.northing, timestamp, id = id, name = individual.local.identifier, month = month, crs = sp::CRS("+init=epsg:32736"))
 
 # ***************************
 # ***************************

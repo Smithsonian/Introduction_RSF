@@ -1,0 +1,566 @@
+---
+title: "Introduction to Animal Movement Analyses"
+author: "Jared Stabach"
+date: '`r format(Sys.time(), "%d %B, %Y")`'
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+      smooth_scroll: true
+    number_sections: false
+    #theme: united
+    #highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Incorporating Multiple Animals
+  >Example: White-bearded wildebeest - Athi-Kaputiei Plains, Kenya
+  
+More than likely, you will have multiple GPS collared animals and will be interested in investigating resource use across your population (or interested in differences in selection between different populations).  Selecting the area in which you will assess availability is one of the most important aspects of a Resource Selection Function analysis, along with the environmental variables that you choose to include in your models (e.g., vegetation productivity (NDVI or EVI), distance to roads, anthropogenic disturbance, elevation, land-cover).  
+
+For the next excercise, we'll shift to investigate resource selection of 3 white-bearded wildebeest (*Connochaetes taurinus*) that were fit with Lotek WildCell GPS collars from 2010-2013 across the Athi-Kaputiei Plains in southern Kenya.  This area is directly adjacent to Kenya's capital city, Nairobi.  Human population density is ~45 people/km$^2$.  Nairobi National Park, established in 1946, represents the dry season range for the species and is located at the northernmost section of this landscape.  The park is fenced along its western, northern, and eastern border.  GPS data were rarified to a 3-hour sampling interval.
+
+In this excercise, you will:
+
+  * Select availability within the home range of each animal
+  * Perform a sensitivity analysis
+  * Analyze data in a generalized linear mixed effects model framework (glmer), to incorporate random effects
+  * Generate a prediction of habitat use
+  * Validate the prediction
+
+### Load Packages
+```{r Library,message=FALSE,warning=FALSE}
+library(arm)
+library(sp)
+library(raster)
+library(adehabitatHR)
+library(rgeos)
+library(rgdal)
+library(date)
+library(lme4)
+library(AICcmodavg)
+```
+
+### Load Data
+Load the Use file and raster layers:
+
+```{r Data}
+# Load the trajectory information (3-hour time interval)
+wild <- read.csv("LMERExample/Athi_mvmt.csv", header=TRUE, sep = ",")
+wild$Date <- as.POSIXct(x=wild$time2, format = "%Y-%m-%d %H:%M:%S", tz="Africa/Nairobi")
+
+# Load park and study area boundary
+NNP_Bound <- readOGR(dsn="AnthroFootprint", layer="NNP_Bound")
+Athi_Bound <- readOGR(dsn="AnthroFootprint", layer="Athi_Bound")
+
+# Load the raster layers that we'll use in this example
+# These are ascii files, but raster can also read grids directly
+anth_risk <- raster("LMERExample/anth_risk.asc")
+prirds <- raster("LMERExample/prirds_dist.asc")
+woody <- raster("LMERExample/woody_dist.asc")
+wtr <- raster("LMERExample/waterpts_dist.asc")
+
+# But, also see:
+#raster.list <- list.files(path="LMERExample/", pattern =".asc", full.names=TRUE)
+#raster.list
+#All.rasters <- stack(raster.list)
+#plot(All.rasters)
+
+# Generate histogram of movements
+hist(wild$dist,breaks=50,xlim=c(0,12000),xlab="3-Hour movement rate (m)",main="Movement Rate",freq=FALSE,col="grey", border="black",density=200)
+
+# Draw gamma distribution
+v <-var(wild$dist, na.rm=TRUE)
+mn <-mean(wild$dist, na.rm=TRUE)
+shp <- mn^2/v
+rate <- mn/v
+x.seq <- seq(0,6000,10)
+z=dgamma(x.seq,shape=shp,rate=rate)
+lines(x.seq,z,col="red",lwd=2)
+
+text(8000,0.0020, paste0("Mn Mvmt =",round(mean(wild$dist,na.rm=TRUE),digits=2),"-m"), cex=1.0)
+	
+# Summarize the maximum movement of each animal
+# What is the maximum distance moved over a 3-hour interval?
+(mv.sum <- aggregate(list(dist = wild$dist),by=list(ID = wild$ID),max,na.rm=TRUE))
+```
+
+```{r Plot}
+# Simplify dataset
+wild <- wild[,c(1,32:33,16:17,41,20)]
+
+par(mfrow=c(1,1))
+plot(Athi_Bound,border="black")
+plot(NNP_Bound,border="green",add=TRUE)
+
+# Convert dataset to a spatial points frame to extract rasters at points
+# Define Projection information (Albers Equal Area, WGS84 Datum)
+proj.info <- "+proj=aea +lat_1=20 +lat_2=-23 +lat_0=0 +lon_0=25 +x_0=0 +y_0=0 +units=m +datum=WGS84"
+
+xy <- wild[c("X","Y")]
+wild.sp <- SpatialPointsDataFrame(xy,wild,proj4string = CRS(proj.info))
+plot(wild.sp,pch=".",col=wild[,1],add=TRUE,cex=2)
+```
+
+### Some Options for Assessing Availability:
+  * Restrict Availability to the Home range of population
+  * Restrict Availability to the Home range of the individual
+  * Restrict Availability by incorporating the maximum movement of each individual
+  * Restrict Availability to the animal's steplength.  For use in a case controlled analysis.
+  
+```{r HomeRange}
+# Type A
+# **** Population Homerange ****
+wild.sp1 <- SpatialPoints(xy,proj4string = CRS(proj.info))
+MCP.HR1 <- mcp(wild.sp1, percent=100, unin = "m", unout = "km2")
+plot(Athi_Bound,border="black")
+plot(NNP_Bound,border="black",add=TRUE)
+plot(MCP.HR1,border="red",add=TRUE)
+points(wild.sp1,pch=".",col=wild$ID)
+
+# Type B
+# **** Individual Homerange ****
+MCP.HR2 <- mcp(wild.sp[,1], percent=100)
+plot(Athi_Bound,border="black")
+plot(NNP_Bound,border="black",add=TRUE)
+plot(MCP.HR2,border=MCP.HR2@data$id,add=TRUE)
+plot(wild.sp,add=TRUE,pch=".",col=wild[,1])
+
+# Type C
+# **** Movement-based, Individual ****
+# Here, we are going to create a buffer around each point and then buffer them together
+plot(Athi_Bound,border="black",ylim=c(-240000,-150000))
+plot(NNP_Bound,border="black",add=TRUE)
+plot(wild.sp,add=TRUE,pch=".",col=wild[,1])
+
+# Loop though and create buffers based on movement
+id <- unique(wild$ID)
+for(i in 1:length(id)){
+  temp <- subset(wild,ID==id[i])
+    temp.sub <- SpatialPointsDataFrame(temp[c("X","Y")],temp)
+    buffer.width <- mv.sum[mv.sum$ID %in% id[i],2]
+    PtBuffer<-gBuffer(temp.sub,width=buffer.width,byid=TRUE) 
+    PtBuffer3 <- gUnaryUnion(PtBuffer)
+    plot(PtBuffer3,border=id[i],add=TRUE)
+}
+
+# Type D
+# **** Movement-based, Individual ****
+# Conditional Logistic Regression (survival package, clogit) - case/control
+# Need to create an ID that is unique to each point location
+# Use the animal's ID, the Julian Date, and the Hour
+wild.sub <- wild
+
+wild.sub$Date <- as.POSIXct(x=wild.sub$Date, format = "%Y-%m-%d %H:%M:%S", tz="Africa/Nairobi")
+Hour <- as.character(format(wild.sub$Date,"%H"))
+Year <- as.integer(format(wild.sub$Date,"%Y"))
+Month <- as.integer(format(wild.sub$Date,"%m"))
+Day <- as.integer(format(wild.sub$Date,"%d"))
+Julian <- mdy.date(Month,Day,Year,nineteen=TRUE,fillday=FALSE,fillmonth=FALSE)
+wild.sub$burst <- paste(as.character(wild.sub$ID),"_",as.numeric(Julian),"_",Hour,sep="")
+
+head(wild.sub)
+plot(Athi_Bound,border="black",ylim=c(-235000,-150000))
+plot(NNP_Bound,border="black",add=TRUE)
+plot(wild.sp,add=TRUE,pch=".",col=wild[,1])
+
+for(i in 1:length(id)){
+  temp <- subset(wild.sub,ID==id[i])
+    temp.sub <- SpatialPointsDataFrame(temp[c("X","Y")],temp)
+    buffer.width <- mv.sum[mv.sum$ID %in% id[i],2]
+    PtBuffer4 <-gBuffer(temp.sub,width=buffer.width,byid=TRUE) 
+    plot(PtBuffer4,border=id[i],add=TRUE)
+}
+```
+
+### Create Use/Available Dataset
+Work Flow:
+
+  * Extract the raster values at each of the *'Use'* locations
+  * Generate a random sample within the *'Availability'* buffers
+  * Extract the raster values at each of the *'Availabile'* locations
+  * Bind the *'Use'* and *'Available*' together, building your database for analysis
+  
+#### Use Dataset
+```{r Extract1}
+# Use Locations: Extract
+wild.sp$anth_risk <-  extract(anth_risk,wild.sp)
+wild.sp$prirds <- extract(prirds,wild.sp)
+wild.sp$woody <- extract(woody,wild.sp)
+wild.sp$wtr <- extract(wtr,wild.sp)
+
+# Input presence value
+wild.sp$Used <- 1
+
+# Convert to dataframe
+wild.sp <- as.data.frame(wild.sp)
+
+# Reorganize data file  
+wild.sp <- wild.sp[,c(1:3,8:12)]
+#head(wild.sp)
+```
+
+### Excercise: Estimate the number of Available points 
+#### Availabile Dataset
+  * How many points should we generate?  
+    + A trade-off between statistical robustness and computer processing time
+  * Create function to generate 100 points per use point for 1 individual
+  * Should be analyzed again if you change your habitat covariates included in your model
+  
+```{r Extract2, eval=T}
+# Subset 'Use' dataset to use as a test to assess availability
+wild.use <- subset(wild.sp,ID == 2840)
+
+rnd.extract <- function(input,buffer,multiplier){
+  # Grab the unique ID
+  ID <- unique(input$ID)
+  
+  # Generate random points
+  random <-spsample(buffer, nrow(input)*multiplier, "random")
+  
+  # Extract
+  random$anth_risk <- extract(anth_risk,random)
+  random$prirds <- extract(prirds,random)
+  random$woody <- extract(woody,random)
+  random$wtr <- extract(wtr,random)
+  
+  # Add in ID
+  random$ID <- ID
+
+  # Input Pseudo-Absence value
+  random$Used <- 0
+  
+  # Convert to a dataframe
+  random <- as.data.frame(random)
+  
+  random <- random[,c(5,7:8,1:4,6)] # This will change based on your dataset
+  colnames(random)[2:3] <- c("X","Y") # Redefine the column names
+  
+  # Return the result
+  return(random)
+}
+```
+
+```{r Availability, eval=F}
+# Not evaluated
+# Calculate Availability for one animals
+# Animal id[1] = 2840
+temp <- subset(wild,ID==id[1])
+  temp.sub <- SpatialPointsDataFrame(temp[c("X","Y")],temp)
+  buffer.width <- mv.sum[mv.sum$ID %in% id[1],2]
+  PtBuffer<-gBuffer(temp.sub,width=buffer.width,byid=TRUE) 
+  PtBuffer3 <- gUnaryUnion(PtBuffer)
+  # Generate random sample and extract the raster values at each point
+  rand <- rnd.extract(temp.sub,PtBuffer3,100)
+
+# Look at your data
+head(rand)
+
+# Modify function slightly for estimating sensitivity (previous excercise). What size sample should we use?
+Sensitivity.RSF <- function(USE,AVAIL,NumberSamples,NumberCoefficients){
+  # Number of Iterations
+  n.iter=100
+
+  # Create matrix to hold everything 
+  # *** Edit number of columns to create…..based on the number of covariates (below) ***
+ beta.1 <- matrix(NA,n.iter,NumberCoefficients) #5 here
+	
+	  # Run simulations.  Sample from dataset and calculate glm.
+	  # Use simulation to test the sensitivity of the number of samples.
+	  for(i in 1:n.iter){
+		  # Draw a sample from the random points file to test the sensitivity
+		  s.index <- sample(nrow(AVAIL),nrow(USE)*NumberSamples,replace=FALSE)
+		  x.a <- AVAIL[s.index,]
+  
+		  # Bind together
+		  x.glm <-rbind(USE, x.a)
+			
+		  # Run GLM # *******Edit covariates ********
+		  out <- glm(Used ~ anth_risk + prirds + woody + wtr, data=x.glm, family="binomial")
+	
+		  # Output coefficients # *** Remove beta.t values as appropriate….should match columns in matrix
+		  beta.1[i,1] <-out$coeff[1]
+		  beta.1[i,2] <-out$coeff[2]
+		  beta.1[i,3] <-out$coeff[3]
+		  beta.1[i,4] <-out$coeff[4]
+		  beta.1[i,5] <-out$coeff[5]
+		  }
+	  # Return the results
+	  return(beta.1)
+}
+
+#### Look at Sensitivity
+Total.Avail.Samples <- c(1,2,3,5,10,20,30,50)
+# How many coefficients included in model
+NumberCoefficients <- 5
+
+## Analysis	
+Sens.List <- vector("list")
+		
+# Create samples availability and model for use in Sensitivity analysis
+# Edit the Use and available dataset
+for (i in 1:length(Total.Avail.Samples)){
+  Sens.1Sample <- Sensitivity.RSF(wild.use,rand,Total.Avail.Samples[i],NumberCoefficients)
+  Sens.List[[i]] <- Sens.1Sample
+}
+
+# Set up blank matrices to store result summaries
+beta.1.up=matrix(0, length(Total.Avail.Samples),NumberCoefficients) 
+beta.1.low=matrix(0, length(Total.Avail.Samples),NumberCoefficients) 
+beta.1.mean=matrix(0, length(Total.Avail.Samples),NumberCoefficients) 
+
+# Variables being monitored # Edit this
+Variables <- c("Beta","Anthropogenic Disturbance","Distance - Primary Roads","Distance - Woody Vegetation","Distance - Water Points")
+
+for (i in 1:length(Total.Avail.Samples)){
+  beta.1.up[i,] <-apply(Sens.List[[i]],2,quantile,prob=0.975, na.rm=TRUE)
+  beta.1.low[i,] <-apply(Sens.List[[i]],2,quantile,prob=0.025, na.rm=TRUE)
+  beta.1.mean[i,] <-apply(Sens.List[[i]],2,mean,na.rm=TRUE)
+  }
+
+# Transpose to plot
+beta.1.up <- t(beta.1.up)
+beta.1.low <- t(beta.1.low)
+beta.1.mean <- t(beta.1.mean)
+  
+# Plot the results
+for (i in 1:nrow(beta.1.up)){
+  plot(Total.Avail.Samples, beta.1.up[i,], typ="l", xaxt="n", ylim=c(min(beta.1.low[i,]), max(beta.1.up[i,])),lty=2, main=paste0(Variables[i]," Sensitivity"), ylab="Coefficient",xlab="Availability Sample Size")
+  axis(side=1, at=Total.Avail.Samples, label=c("1x","2x","3x","5x","10x","20x","30x","50x"))  #XLab
+  lines(Total.Avail.Samples, beta.1.low[i,], lty=2)
+  lines(Total.Avail.Samples, beta.1.mean[i,])
+}
+```
+
+#### Create Validation Dataset
+```{r Validation}
+# Create a validation dataset to assess prediction
+# Remove 20% of the data from each individual (could also just use an entire individual)
+# Best to remove large 'chunks' of the data, rather than a random sample for validation
+# Otherwise, validation is likely biased
+wild.val <- NULL
+wild2 <- NULL
+Removal.Amt <- 0.20
+
+for(i in 1:length(id)){
+  temp <- subset(wild.sp,ID==id[i])
+    howmany <- round(nrow(temp)*Removal.Amt,digits=0)
+    # Randomly select the starting position to remove data
+    index <- sample(nrow(temp),1,replace=FALSE)
+    ToRemove <- index+howmany
+      #Make sure it's not at the end of the dataset.  If it is, create a new starting point.
+      if(ToRemove>nrow(temp)){index <- nrow(temp)-howmany}
+    index <- seq(index,ToRemove,1)
+    temp2 <- temp[index,]
+    temp <- temp[-index,] 
+    # Append to wild.val and generate a new Use dataset.  Wild.val will be the validation dataset.
+    wild.val <- rbind(wild.val,temp2)
+    wild2 <- rbind(wild2,temp)
+}
+
+# Overwrite existing Use dataset
+wild.sp <- wild2
+rm(wild2)
+```
+
+#### Build Use/Availability
+  >Example: Type C Resource Selection
+
+```{r Database}
+# Extract availability at points
+# Using 30 available points...based on simulation approach
+All.Available <- NULL
+
+for(i in 1:length(id)){
+  temp <- subset(wild.sp,ID==id[i])
+    temp.sub <- SpatialPointsDataFrame(temp[c("X","Y")],temp)
+    buffer.width <- mv.sum[mv.sum$ID %in% id[i],2]
+    PtBuffer<-gBuffer(temp.sub,width=buffer.width,byid=TRUE) 
+    PtBuffer3 <- gUnaryUnion(PtBuffer)
+      # Generate random sample and extract the raster values at each point
+      rand <- rnd.extract(temp.sub,PtBuffer3,30)
+      All.Available <- rbind(All.Available,rand)
+}
+
+# Combine Use and Availability
+Use.Avail <- rbind(wild.sp,All.Available)
+
+# Convert distance measures from meters to Kilometers
+# Could do this....but we'll scale the variables anyway.
+#m_to_km.func <- function(x) x*0.001
+#Use.Avail[4:7] <- lapply(Use.Avail[4:7],m_to_km.func)
+```
+
+### Model: Resource Selection
+Multiple ways to model the data:
+  
+  * Two-stage approach
+    + Fit a glm model for each individual
+    + Average the coefficients
+  * Account for individual random effects (what we'll do here)
+    + Generalized Linear Mixed Effects Regression (GLMER)
+    
+```{r Model}
+# Scale the variables first and create a frame to hold all variables (important for later when generating prediction)
+# Summarize scale parameters
+# Input these results to a matrix to view and use with ArcGIS
+Scale.Val <- matrix(NA, 2, ncol(Use.Avail[,4:7]), dimnames=list(c("Mn","Sd"),c("anth_risk","prirds","woody","wtr")))
+
+# Calculate the mean and standard deviations.....hold in a matrix called Scale.Val
+Scale.Val[1,] <- apply(Use.Avail[,4:7],2,mean)
+Scale.Val[2,] <- apply(Use.Avail[,4:7],2,sd)
+
+# Look at values
+Scale.Val
+
+# Now actually scale the values
+Use.Avail[4:7] <- lapply(Use.Avail[4:7],scale)
+
+# Assess colinearity
+Assess.cor <- Use.Avail[,c(4:7)]
+(All.Data.cor <- cor(Assess.cor))
+which(abs(All.Data.cor) > 0.60 & All.Data.cor < 1.0)
+# There are two variables (woody vegetation and distance to water) that are highly correlated
+# We are ignoring them here, but this indicates potential problems.
+
+# Create a few models that you want to test
+#Null.model <- glmer(Used ~ 1 + (1|ID), data = Use.Avail, family = binomial(link="logit"))
+#Pred.model <- glmer(Used ~ woody + I(woody^2) + wtr + I(wtr^2) + (1|ID), data = Use.Avail, family = binomial(link="logit"))
+#HDist.model <- glmer(Used ~ anth_risk + prirds + I(prirds^2) + woody + I(woody^2) + (1|ID), data = Use.Avail, family = binomial(link="logit"))
+#All.model <- glmer(Used ~ anth_risk + prirds + I(prirds^2) + woody + I(woody^2) + wtr + I(wtr^2) + (1|ID), data = Use.Avail, family = binomial(link="logit"))
+
+# Or load the models to save time
+load("Test_models.RData")
+```
+
+### Model Evaluation
+```{r Evaluation}
+# evaluate the models by AIC
+mod.cand <- list()
+mod.cand[[1]] <- Null.model 
+mod.cand[[2]] <- Pred.model 
+mod.cand[[3]] <- HDist.model 
+mod.cand[[4]] <- All.model 
+Modnames <- paste("Mod", 1:length(mod.cand), sep = " ")
+
+# Summary Table
+res.table <- aictab(cand.set = mod.cand, modnames = Modnames, second.ord = TRUE)
+print(res.table)
+
+# Calculate likelihood ratio
+#anova(mod.cand[[1]],mod.cand[[2]],test="chisq")
+#anova(mod.cand[[1]],mod.cand[[3]],test="chisq")
+#anova(mod.cand[[1]],mod.cand[[4]],test="chisq")
+
+# Summarize the best model
+summary(All.model)
+coef <- summary(All.model)
+coef <- coef$coefficients
+
+# Get confidence intervals (CIs) using the SEs
+se <- sqrt(diag(vcov(All.model)))
+# Table of Estimates with 95% CI
+(tab <- cbind(Est = fixef(All.model),LL = fixef(All.model) - 1.96 * se, UL = fixef(All.model) + 1.96 * se))
+# To get odds ratios instead of coefficients on the logit scale, exponentiate the estimate and CIs
+exp(tab)
+```
+
+### Model Prediction
+Because we scaled our input values into the model, we **must** also scale the raster values when making a prediction.
+
+```{r Prediction}
+Scale.Val
+s.anth_risk <- (anth_risk-Scale.Val[1,1])/Scale.Val[2,1]
+s.prirds <- (prirds-Scale.Val[1,2])/Scale.Val[2,2]
+s.woody <- (woody-Scale.Val[1,3])/Scale.Val[2,3]
+s.wtr <- (wtr-Scale.Val[1,4])/Scale.Val[2,4]
+
+rsf <- (exp(s.anth_risk*coef[2] + s.prirds*coef[3] + (s.prirds*s.prirds)*coef[4] + s.woody* coef[5] + (s.woody*s.woody)*coef[6] + s.wtr*coef[7] + (s.wtr*s.wtr)*coef[8])/
+(1 + exp(s.anth_risk*coef[2] + s.prirds*coef[3] + (s.prirds*s.prirds)*coef[4] + s.woody*coef[5] + (s.woody*s.woody)*coef[6] + s.wtr*coef[7] + (s.wtr*s.wtr)*coef[8])))
+
+plot(rsf)
+```
+
+### Model Validation
+  >With thanks to Julien Fattebert
+  
+Method follows *k*-fold partitioning design recommended by Boyce et al. 2002.
+```{r Validate Prediction}  
+# Extract quantile values at 0.10 intervals
+q <- quantile(rsf, seq(0.1,0.9,0.1))
+
+# Specify min and max values
+min <- 0
+max <- max(getValues(rsf))
+
+# Set conditions
+rsf_reclass = reclassify(rsf, c(min, q[1], 1, 
+                     q[1], q[2], 2, 
+                     q[2], q[3], 3, 
+                     q[3], q[4], 4, 
+                     q[4], q[5], 5, 
+                     q[5], q[6], 6, 
+                     q[6], q[7], 7, 
+                     q[7], q[8], 8,
+                     q[8], q[9], 9,
+                     q[9], max, 10),
+                include.lowest=TRUE, right=FALSE)
+#plot(rsf_reclass)
+
+# Now extract the rsf reclass values at each validation point
+xy <- wild.val[c("X","Y")]
+wild.val <- SpatialPointsDataFrame(xy,wild.val,proj4string = CRS(proj.info))
+
+valid_rsf <- extract(rsf_reclass, wild.val, df=TRUE)
+hist(valid_rsf$layer, breaks=seq(0, 10, 1), freq=T,xlab="Classes",main="Histogram of validation data")
+# Summarize bin values and convert to dataframe
+df <- data.frame(table(valid_rsf$layer))
+# Ensure values are numeric
+df$Var1 <- as.numeric(df$Var1)
+df$Freq <- as.numeric(df$Freq)
+# Run Spearman's Rank Correlation
+cor.test(df$Var1, df$Freq, method = "spearman")
+```
+
+### Response Curves
+  * Graph response curves.  More difficult in a Mixed Effects Regression framework.
+    + Could hold all other variables constant (adapt Bjorn's code). 
+    + A common technique used, but there is debate on its accuracy due to incorporation of random effects in mixed effects models.
+    + See Ben Bolker, coefplot2 (install.packages("coefplot2",repos="http://www.math.mcmaster.ca/bolker/R", type="source")
+    
+```{r Response Curves}
+# Set sequence 
+x.min <- min(Use.Avail$anth_risk)
+x.max <- max(Use.Avail$anth_risk)
+x <- seq(x.min,x.max, 0.1)
+
+# Calculate coefficients
+coef0 <- coef[1]
+#coef1 <- coef[2]
+coef2 <- coef[3]*median(Use.Avail$prirds)
+coef3 <- coef[4]*median(I(Use.Avail$prirds^2))
+coef4 <- coef[5]*median(Use.Avail$woody)
+coef5 <- coef[6]*median(I(Use.Avail$woody^2))
+coef6 <- coef[7]*median(Use.Avail$wtr)
+coef7 <- coef[8]*median(I(Use.Avail$wtr^2))
+
+rsf0 <- ((exp(coef[2]*x + coef2 + coef3 + coef4 + coef5 + coef6 + coef7))
+			/(1 + exp(coef[2]*x + coef2 + coef3 + coef4 + coef5 + coef6 + coef7)))
+			
+plot(x, rsf0, type="l",lwd=1,col="black",axes=FALSE,xlab="Anthropogenic Risk",ylab="Relative Probability of Selection")
+
+x.unscale <- x*Scale.Val[2,1]+Scale.Val[1,1]
+
+axis(1,at=c(min(x),median(x),max(x)),lab=c(round(min(x.unscale)),"",round(max(x.unscale))))
+axis(2)
+
+# Or, Ben Bolker function
+# Setup names to use in plot
+#lablist <- c("anth_risk","prirds","prirds^2","woody","woody^2","wtr","wtr^2")
+#coefplot2(All.model, lablist,intercept=FALSE,vertical=FALSE, var.las = 1)
+```
