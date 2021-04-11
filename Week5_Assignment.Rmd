@@ -17,10 +17,10 @@ Objectives of this exercise are to improve your skills working with spatial obje
 Once again, please do not hesitate to ask questions or to offer help to others on the Blackboard discussion board. As per usual, we expect everyone to submit an independent project, but there is no problem with providing assistance to others. Please upload a WORD document answering the question below, along with your annotated [R]() script. Both documents should be posted to the relevant assignment in [Blackboard](https://mymasonportal.gmu.edu/).
 
 # Datasets
-All datasets required to complete this homework are included in the files provided during lecture.  You will need to load two `.Rdata` files to access the wildebeest movement dataset and the shapefile of the study area boundary (`wildMara.Rdata`) and the spatial data layers (`Wild_SpatialData.Rdata`) to relate to the movement "Use" dataset.  Both files are included in the ".zip" file on [Blackboard](), within the Week4/Data directory.  The files included are:
+All datasets required to complete this homework are included in the files provided during lecture.  You will need to load two `.Rdata` files to access the wildebeest movement dataset and the spatialPolygonsDataFrame of the study area boundary (`wildMara.Rdata`) and the spatial data layers (`Wild_SpatialData.Rdata`) to relate to the movement "Use" dataset.  Both files are included in the ".zip" file on [Blackboard](), within the Week4/Data directory.  The files included are:
 
 * A dataframe, named `wild.Athi`, which includes the "Use" locations of 12 wildebeest
-* A shapefile, named `Athi_Bound`, which is a boundary of the study area
+* A SpatialPolygonsDataFrame, named `Athi_Bound`, which is a boundary of the study area
 * Raster files (7 files total) of anthropogenic risk (`anth_risk`), distance to fences (`fence_dist`), distance to primary roads (`prirds_dist`), distance to secondary roads (`secrds_dist`), distance to permanent rivers (`river_dist`), distance to water wells (`waterpts_dist`), and distance to woody vegetation (`woody_dist`).
 
 You'll need the following libraries to complete this assignment:
@@ -50,15 +50,16 @@ load(file = "./Data/Wild_SpatialData.Rdata")
 You will now see the movement datasets (you can ignore the `wild.Mara` and the `wb.sim` files for this exercise) in your working environment:
 
 * wildAthi - Dataframe (not spatial)
-* anth_risk - Raster Layer (Albers Equal Area Coordinate Reference System)
-* fence_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
-* prirds_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
-* secrds_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
-* river_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
-* waterpts_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
-* woody_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
+* Athi_Bound - SpatialPolygonsDataFrame
+* anth_risk - Raster Layer
+* fence_dist - Raster Layer
+* prirds_dist - Raster Layer
+* secrds_dist - Raster Layer
+* river_dist - Raster Layer
+* waterpts_dist - Raster Layer
+* woody_dist - Raster Layer
 
-**Question 1**: Are all files spatial and in the same coordinate reference system?  If no, make all files spatial and make sure their projections match.  Use the same projection information provide in class (Albers Equal Area).
+**Question 1**: Are all the files spatial and in the same coordinate reference system?  If no, make all files spatial and make sure their projections match.  Use the same projection information provide in class (Albers Equal Area).
 
 ```{r Reproject, eval=T, echo=T}
 # Look at the file details

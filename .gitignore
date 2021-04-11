@@ -3,3 +3,7 @@
 .RData
 .Ruserdata
 *.pptx
+*.Rmd
+export_to_R.R
+Mvmt.png
+*.Rproj
