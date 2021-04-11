@@ -10,45 +10,55 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 # Description
-In this week's assignment, you'll follow instructions provided in class to model the occurrence of dorcas gazelle (*Gazelle dorcas*).  More widely distributed across the sahara desert than addax (*Addax nasomaculatus*), dorcas gazelle are susceptible to displacement from pastoral land uses and are assumed to be in rapid decline due to poaching and disturbance from oil exploration activities. Sightings of dorcas gazelle were recorded simultaneously with ground-based surveys to record addax occurrence. Your goal in this assignment is to re-analyze the dataset provided in class, with a goal of evaluating how dorcas gazelle use habitat in relation to addax. 
+In this week's assignment, you'll follow instructions provided in class and conduct a Resource Selection Function (RSF) on a single white-bearded wildebeest (*Connochaetes taurinus*) tracked via Lotek WildCell$^{TM}$ GPS collars from 2010-2013, with a focus on animals monitored across the Athi-Kaputiei Plains in southern Kenya. This area is located directly adjacent to Kenya's capital city, Nairobi.  Human population density across the study area is ~45 people/km$^2$.  Nairobi National Park, established in 1946, represents the dry season range of the species and is located at the northernmost section of the landscape.  The park is fenced along its western, northern, and eastern border.
 
-Objectives of this exercise are to improve your skills working with spatial objects to fit a logistic regression model to the data and provide a raster prediction of dorcas gazelle occurrence. Importantly, you will need to assess model assumptions, graph response curves, and evaluate model coefficients.  
+Objectives of this exercise are to improve your skills working with spatial objects.  Similar to analyses with Addax (*Addax nasomaculatus*) and dorcas gazelle (*Gazelle dorcas*), you'll fit a logistic regression model to the data and provide a raster prediction have habitat suitability.  We will also use the output prediction provided in class to provide an averaged prediction between these two animals.
 
-Please don't hesitate to ask questions or to offer help to others on the Blackboard discussion board. We expect everyone to submit an independent project, but there is no problem with providing assistance to others. Part of what we hope to facilitate with this class is a new community of researchers for you to interact with and learn from. Please upload a WORD document answering the question below, along with your annotated [R]() script. Both documents should be posted to the relevant assignment in [Blackboard](https://mymasonportal.gmu.edu/).
+Once again, please do not hesitate to ask questions or to offer help to others on the Blackboard discussion board. As per usual, we expect everyone to submit an independent project, but there is no problem with providing assistance to others. Please upload a WORD document answering the question below, along with your annotated [R]() script. Both documents should be posted to the relevant assignment in [Blackboard](https://mymasonportal.gmu.edu/).
 
 # Datasets
-All datasets required to complete this homework are included in the "`Week4_Homework_Data.Rdata`" file on [Blackboard](), within the Week4/Data directory.  The files in this data file include:
+All datasets required to complete this homework are included in the files provided during lecture.  You will need to load two `.Rdata` files to access the wildebeest movement dataset and the shapefile of the study area boundary (`wildMara.Rdata`) and the spatial data layers (`Wild_SpatialData.Rdata`) to relate to the movement "Use" dataset.  Both files are included in the ".zip" file on [Blackboard](), within the Week4/Data directory.  The files included are:
 
-* A spatial points data frame, named `Occ.Hmk`, which includes the occurrence of dorcas gazelle (i.e., `obsDorcas`)
-* Raster files (2 files total) of ndvi (`ndvi`) and surface roughness (`rough`).
+* A dataframe, named `wild.Athi`, which includes the "Use" locations of 12 wildebeest
+* A shapefile, named `Athi_Bound`, which is a boundary of the study area
+* Raster files (7 files total) of anthropogenic risk (`anth_risk`), distance to fences (`fence_dist`), distance to primary roads (`prirds_dist`), distance to secondary roads (`secrds_dist`), distance to permanent rivers (`river_dist`), distance to water wells (`waterpts_dist`), and distance to woody vegetation (`woody_dist`).
 
 You'll need the following libraries to complete this assignment:
 
 ```{r Libraries Require, eval=T, echo=T, message=F, warning=F}
-library(arm)
-library(DAAG)
+library(amt) 
 library(dplyr)
+library(ggplot2)
+library(jtools)
+library(lme4)
 library(lubridate)
-library(pROC)
-library(rgdal)
+library(raster)
+library(sp)
+library(sjPlot)
 library(usdm)
 library(visreg)
 ```
 
 # Assignment
-Load the `Week4_Homework_Data.Rdata` file into [R]().
+Load the `wildMara.Rdata` and `Wild_SpatialData.Rdata` file into [R]().
 
 ```{r Load, eval=T, echo=T}
-load(file = "./Data/Week4_Homework_Data.Rdata")
+load(file = "./Data/wildMara.Rdata")
+load(file = "./Data/Wild_SpatialData.Rdata")
 ```
 
-You should now see three files in your working environment:
+You will now see the movement datasets (you can ignore the `wild.Mara` and the `wb.sim` files for this exercise) in your working environment:
 
-* Occ.Hmk - Spatial Points DataFrame
-* ndvi - Raster Layer
-* rough - Raster Layer
+* wildAthi - Dataframe (not spatial)
+* anth_risk - Raster Layer (Albers Equal Area Coordinate Reference System)
+* fence_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
+* prirds_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
+* secrds_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
+* river_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
+* waterpts_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
+* woody_dist - Raster Layer (Albers Equal Area Coordinate Reference System)
 
-**Question 1**: Are all files in the same coordinate reference system?  If no, reproject the file(s) to UTM Zone 32 North, WGS84.
+**Question 1**: Are all files spatial and in the same coordinate reference system?  If no, make all files spatial and make sure their projections match.  Use the same projection information provide in class (Albers Equal Area).
 
 ```{r Reproject, eval=T, echo=T}
 # Look at the file details
