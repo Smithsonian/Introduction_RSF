@@ -19,10 +19,9 @@ library(raster)
 library(MODIS)
 
 # Importing and subsetting trajectories
-
-#load("./Data/DataFiles/Mara_Data.Rda")
-#data.Mara <- subset(data.Mara, Name == "Nagol" | Name == "Naserian" | Name == "Naboisho" | Name == "Fifteen")
 load("Movement_Animation/Data/Mara_Test.Rda")
+head(data.Mara)
+unique(data.Mara$ID)
 
 # Drop levels
 data.Mara <- droplevels(data.Mara)
@@ -38,23 +37,16 @@ m <- move(x = data.Mara[["Long"]], y = data.Mara[["Lat"]],
           proj = "+proj=longlat +datum=WGS84 +no_defs",
           removeDuplicatedTimestamps = TRUE)
 
-#m <- df2move(data.Mara,
-#        proj = "+proj=longlat +datum=WGS84 +no_defs",
-#        x = "Long", y = "Lat", time = "timestamp", track_id = "Name")
-
 # Check time stamps and sampling rates (temporal resolution) of the trajectories:
 lag <- unlist(timeLag(m, unit = "mins"))
-
 median(lag)
 sd(lag)
 
 # In general, animals were monitored every hour during day (6 am to 6 pm) and every three hours at night (6 pm to 6 am)
-
 # moveVis needs to assign each location of a trajectory to a specific frame, the sampling times of all locations across all trajectories need to be aligned to share a uniform temporal resolution and uniform time stamps that can be assigned to frames. moveVis includes a dedicated function to align trajectories using linear interpolation, named align_move():
 
 # Aligning to a 3 hour interval
 m <- align_move(m, res = 180, digit = 0, unit = "mins")
-
 length(unique(timestamps(m)))
 
 # subset by character times
@@ -65,7 +57,6 @@ min(timestamps(m))
 max(timestamps(m))
 
 # Animating trajectories on a static OpenStreetMap base map
-
 # Create new extent
 ext <- extent(m) * 1.15
 ext@ymin <- ext@ymin * 1.05
@@ -78,7 +69,7 @@ frames <- frames_spatial(m, trace_show = TRUE, equidistant = FALSE,
 
 frames[[300]]
 
-# Frames can be edited before animating them. moveVis provides a set of functions to customize the appearance of frames after they have been created. For example, the user can add title, caption and axis texts using add_labels(), time stamps using add_timestamps(), a progress bar using add_progress() or basic map elements such as a north arrow using add_northarrow() and a scale bar using add_scalebar().
+# moveVis provides a set of functions to customize the appearance of frames after they have been created. For example, the user can add title, caption and axis texts using add_labels(), time stamps using add_timestamps(), a progress bar using add_progress() or basic map elements such as a north arrow using add_northarrow() and a scale bar using add_scalebar().
 
 frames <- frames %>% add_labels(title = "White-bearded wildebeest (Connochaetes taurinus) Migration", caption = "Trajectory data: Stabach et al. (2015) 
 Map: OpenStreetMap/Stamen; Projection: Geographic, WGS84", 
@@ -99,26 +90,23 @@ frames[[30]]
 # In this example, a mov video is created:
 #animate_frames(frames, width = 800, height = 800, out_file = "wildebeest_osm.mov", end_pause = 1)
 
+# Okay, this part works fine
+
 # Animating trajectories on a dynamic NDVI base map
+# *************************************************
+# *************************************************
 
 # Load raster data to use as background
-#temp <- list.files(path="C:/Jared/GitHub/Wildebeest_MaraChange/Data/MODIS/PROCESSED", pattern=".tif", recursive = T, full.names=TRUE)
-#ndvi <- lapply(temp,FUN=stack) 
-#ndvi <- lapply(ndvi, FUN = function(x) {x*0.0001})
+temp <- list.files(path="./Movement_Animation/Data/MODIS", pattern=".tif", recursive = T, full.names=TRUE)
+ndvi <- lapply(temp,FUN=stack) 
+#ndvi <- lapply(ndvi, FUN = function(x) {x*0.0001}) # These are the real values, but makes file large
 
-#temp <- lapply(list.files(path="C:/Jared/GitHub/Wildebeest_MaraChange/Data/MODIS/PROCESSED/MOD13Q1.006_20201015154325", pattern=".tif", full.names=TRUE), raster)
-ndvi <- lapply(ndvi, FUN = function(x) {x*0.0001})
-
-
-#newproj <- "+proj=longlat +datum=WGS84 +no_defs"
-
-# Create subset of the same dates
-#ndvi <- ndvi[1:7]
 # Project to Lat/Long to match movement data
-#ndvi <- lapply(ndvi, FUN = function(x) {projectRaster(x, crs = newproj, method="bilinear")})
+newproj <- "+proj=longlat +datum=WGS84 +no_defs"
+ndvi <- lapply(ndvi, FUN = function(x) {projectRaster(x, crs = newproj, method="bilinear")})
+#save(ndvi, file = "./Movement_Animation/ndvi.rda")
 
-#save(ndvi, file = "ndvi.rda")
-load("Data/ndvi.rda")
+#load("Data/ndvi.rda")
 plot(ndvi[[1]])
 
 # Extract the dates
