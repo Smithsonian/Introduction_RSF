@@ -112,7 +112,7 @@ plot(ndvi[[1]])
 # Extract the dates
 # *************************
 # *************************
-#temp <- list.files(path="./Data/MODIS/PROCESSED", pattern=".tif", recursive = T, full.names=FALSE)
+#temp <- list.files(path="./Movement_Animation/Data/MODIS", pattern=".tif", recursive = T, full.names=TRUE)
 #temp <- extractDate(temp, asDate = TRUE) # Or use the position of the date in the file
 
 #ndvi_times <- temp$inputLayerDates
@@ -122,73 +122,28 @@ plot(ndvi[[1]])
 #ndvi_times <- as.POSIXct(ndvi_times)
 #attr(ndvi_times, "tzone") <- "UTC"
 
-#save(ndvi_times, file = "ndvi_time.rda")
-load("C:/Jared/GitHub/Wildebeest_MaraChange/Data/ndvi_time.rda")
+#save(ndvi_times, file = "./Movement_Animation/ndvi_time.rda")
+load("./Movement_Animation/ndvi_time.rda")
 
 # Both the raster list and the respective dates can be passed to frames_spatial() instead of defining a map service and type. Using fade_raster, the user can decide whether moveVis should continuously fade between raster images by interpolating them over time or instead should switch between raster images discretely. In this example, fading is activated to create a dynamically changing base map.
 
+# Reduce the ndvi list to first 7, starting with 23 April 2010 (Day 113)
+ndvi <- ndvi[1:7]
+
+# This part doesn't work..............
 frames <- frames_spatial(m, r_list = ndvi, r_times = ndvi_times,
                          fade_raster = TRUE, ext = ext,
                          trace_show = T, trace_colour = "white")
 
-#frames.sp <- frames_spatial(m, r_list = ndvi, r_times = ndvi_times, r_type = "gradient",
-#                            fade_raster = TRUE)
+#frames[[200]]
 
+#  Build summary graphs
 frames.flow <- frames_graph(m, ndvi, ndvi_times, path_legend = FALSE, graph_type = "flow")
 frames.hist <- frames_graph(m, ndvi, ndvi_times, path_legend = FALSE, graph_type = "hist")
-
-#frames[[200]]
 
 # check lengths (must be equal)
 sapply(list(frames, frames.flow, frames.hist), length)
 
 # Let's join the graph frames vertically
 frames.join.gr <- join_frames(list(frames.flow, frames.hist), ncol = 1, nrow = 2)
-frames.join.gr[[500]]
-
-
-
-
-
-
-
-
-
-
-# By default, continuous variables are visualized by a blue coloured gradient. Map colours can be overwritten to apply a custom colour ramp.
-
-frames <- frames %>% 
-  add_colourscale("gradient", colours = c("sandybrown", "white",
-                                          "green", "darkgreen"), na.colour = "lightskyblue",
-                  legend_title = "NDVI")
-
-frames[[200]]
-
-# Frames are customized and animated the same way as before.
-frames <- frames %>% 
-  add_labels(title ="White Storks (Ciconia ciconia) Migration 2018",
-             caption = "Trajectory data: Cheng et al. (2019);
-    Fiedler et al. (2013-2019), doi:10.5441/001/1.ck04mn78 Map: NASA
-    MODIS MOD13Q1 NDVI/Stamen; Projection: Geographic, WGS84",
-             x = "Longitude", y = "Latitude") %>%
-  add_timestamps(type = "label") %>% 
-  add_progress(colour = "white") %>%
-  add_northarrow(colour = "black", position = "bottomleft") %>% 
-  add_scalebar(colour = "black", position = "bottomright",
-               distance = 10)
-
-frames[[200]]
-
-animate_frames(frames, width = 800, height = 800,
-               out_file = "S2_wildebeest_ndvi_animation.mov", end_pause = 1)
-
-
-
-
-
-
-  
-
-
-  
-
+frames.join.gr[[200]]
