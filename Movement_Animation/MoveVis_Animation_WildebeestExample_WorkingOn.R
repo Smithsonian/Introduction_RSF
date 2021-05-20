@@ -106,6 +106,10 @@ frames[[30]]
 #ndvi <- lapply(temp,FUN=stack) 
 #ndvi <- lapply(ndvi, FUN = function(x) {x*0.0001})
 
+#temp <- lapply(list.files(path="C:/Jared/GitHub/Wildebeest_MaraChange/Data/MODIS/PROCESSED/MOD13Q1.006_20201015154325", pattern=".tif", full.names=TRUE), raster)
+ndvi <- lapply(ndvi, FUN = function(x) {x*0.0001})
+
+
 #newproj <- "+proj=longlat +datum=WGS84 +no_defs"
 
 # Create subset of the same dates
@@ -131,7 +135,7 @@ plot(ndvi[[1]])
 #attr(ndvi_times, "tzone") <- "UTC"
 
 #save(ndvi_times, file = "ndvi_time.rda")
-load("Data/ndvi_time.rda")
+load("C:/Jared/GitHub/Wildebeest_MaraChange/Data/ndvi_time.rda")
 
 # Both the raster list and the respective dates can be passed to frames_spatial() instead of defining a map service and type. Using fade_raster, the user can decide whether moveVis should continuously fade between raster images by interpolating them over time or instead should switch between raster images discretely. In this example, fading is activated to create a dynamically changing base map.
 
