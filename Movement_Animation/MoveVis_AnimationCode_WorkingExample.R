@@ -1,4 +1,3 @@
-## Not run: 
 library(moveVis)
 library(move)
 

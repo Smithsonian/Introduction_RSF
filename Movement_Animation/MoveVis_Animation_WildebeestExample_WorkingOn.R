@@ -31,10 +31,14 @@ colnames(data.Mara)
 range(data.Mara$timestamp)
 unique(data.Mara[["individual.local.identifier"]])
 
+# Make sure timestamp is UTC for this
+library(lubridate)
+data.Mara$timestamp <- with_tz(data.Mara$timestamp, tz = "UTC")
+
 # Converting to a move class
 m <- move(x = data.Mara[["Long"]], y = data.Mara[["Lat"]],
           time = data.Mara[["timestamp"]], animal = data.Mara[["Name"]],
-          proj = "+proj=longlat +datum=WGS84 +no_defs",
+          proj = "+init=epsg:4326 +proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0",
           removeDuplicatedTimestamps = TRUE)
 
 # Check time stamps and sampling rates (temporal resolution) of the trajectories:
@@ -45,16 +49,21 @@ sd(lag)
 # In general, animals were monitored every hour during day (6 am to 6 pm) and every three hours at night (6 pm to 6 am)
 # moveVis needs to assign each location of a trajectory to a specific frame, the sampling times of all locations across all trajectories need to be aligned to share a uniform temporal resolution and uniform time stamps that can be assigned to frames. moveVis includes a dedicated function to align trajectories using linear interpolation, named align_move():
 
-# Aligning to a 3 hour interval
-m <- align_move(m, res = 180, digit = 0, unit = "mins")
-length(unique(timestamps(m)))
-
-# subset by character times
-m <- subset_move(m, from = "2010-05-27 12:00:00", to = "2010-08-01 12:00:00")
-
 # check min and max of result
 min(timestamps(m))
 max(timestamps(m))
+
+# subset by character times...example
+m <- subset_move(m, from = "2010-05-27 12:00:00", to = "2010-08-01 12:00:00")
+
+# Align to a 3 hour interval
+m <- align_move(m, res = 60, unit = "mins")
+m@data[1:200,]
+
+#m <- align_move(move_data, res = 6, unit = "mins")
+length(unique(timestamps(m)))
+
+
 
 # Animating trajectories on a static OpenStreetMap base map
 # Create new extent
@@ -97,53 +106,74 @@ frames[[30]]
 # *************************************************
 
 # Load raster data to use as background
-temp <- list.files(path="./Movement_Animation/Data/MODIS", pattern=".tif", recursive = T, full.names=TRUE)
-ndvi <- lapply(temp,FUN=stack) 
+#temp <- list.files(path="C:/Jared/GitHub/Wildebeest_MaraChange/Data/MODIS", pattern=".tif", recursive = T, full.names=TRUE)
+#ndvi <- lapply(temp,FUN=stack) 
+
+# Crop stack
+#ndvi.ext <- extent(713000,820000,9820000,9879000)
+#ndvi <- lapply(ndvi, FUN = crop, y = ndvi.ext)
+
 #ndvi <- lapply(ndvi, FUN = function(x) {x*0.0001}) # These are the real values, but makes file large
 
 # Project to Lat/Long to match movement data
-newproj <- "+proj=longlat +datum=WGS84 +no_defs"
-ndvi <- lapply(ndvi, FUN = function(x) {projectRaster(x, crs = newproj, method="bilinear")})
+#newproj <- "+proj=longlat +datum=WGS84 +no_defs"
+#ndvi <- lapply(ndvi, FUN = function(x) {projectRaster(x, crs = newproj, method="bilinear")})
 #save(ndvi, file = "./Movement_Animation/ndvi.rda")
 
-#load("Data/ndvi.rda")
+load("Movement_Animation/ndvi.rda")
 plot(ndvi[[1]])
 
 # Extract the dates
 # *************************
 # *************************
-#temp <- list.files(path="./Movement_Animation/Data/MODIS", pattern=".tif", recursive = T, full.names=TRUE)
-#temp <- extractDate(temp, asDate = TRUE) # Or use the position of the date in the file
+temp <- list.files(path="C:/Jared/GitHub/Wildebeest_MaraChange/Data/MODIS", pattern=".hdf", recursive = T, full.names=TRUE)
+temp <- extractDate(temp, asDate = TRUE) # Or use the position of the date in the file
 
-#ndvi_times <- temp$inputLayerDates
+ndvi_times <- temp$inputLayerDates
 
 # Subset times to match the movement dataset
-#ndvi_times <- ndvi_times[ndvi_times <= "2010-08-05"]
-#ndvi_times <- as.POSIXct(ndvi_times)
-#attr(ndvi_times, "tzone") <- "UTC"
+ndvi_times <- ndvi_times[ndvi_times > "2010-05-10" & ndvi_times <= "2010-08-05"]
+ndvi_times <- as.POSIXct(ndvi_times)
+attr(ndvi_times, "tzone") <- "UTC"
+
+# Add in the hour
+library(lubridate)
+ndvi_times <- ndvi_times + hours(12)
 
 #save(ndvi_times, file = "./Movement_Animation/ndvi_time.rda")
-load("./Movement_Animation/ndvi_time.rda")
+#load("./Movement_Animation/ndvi_time.rda")
 
 # Both the raster list and the respective dates can be passed to frames_spatial() instead of defining a map service and type. Using fade_raster, the user can decide whether moveVis should continuously fade between raster images by interpolating them over time or instead should switch between raster images discretely. In this example, fading is activated to create a dynamically changing base map.
 
 # Reduce the ndvi list to first 7, starting with 23 April 2010 (Day 113)
-ndvi <- ndvi[1:7]
+ndvi <- ndvi[2:7]
+ndvi <- lapply(ndvi, FUN = function(x) {x*0.0001}) 
 
 # This part doesn't work..............
-frames <- frames_spatial(m, r_list = ndvi, r_times = ndvi_times,
-                         fade_raster = TRUE, ext = ext,
-                         trace_show = T, trace_colour = "white")
+#frames <- frames_spatial(m, r_list = ndvi, r_times = ndvi_times,
+#                         fade_raster = TRUE, r_type = "gradient",
+#                         trace_show = T, trace_colour = "white")
 
-#frames[[200]]
+frames.sp <- frames_spatial(m, r_list = ndvi, r_times = ndvi_times, r_type = "gradient",
+                            fade_raster = TRUE)
+
+frames.sp[[200]]
+
+save(m,ndvi,ndvi_times, file = "./Movement_Animation/Move_Data_Example.Rda")
 
 #  Build summary graphs
 frames.flow <- frames_graph(m, ndvi, ndvi_times, path_legend = FALSE, graph_type = "flow")
 frames.hist <- frames_graph(m, ndvi, ndvi_times, path_legend = FALSE, graph_type = "hist")
 
 # check lengths (must be equal)
-sapply(list(frames, frames.flow, frames.hist), length)
+sapply(list(frames.sp, frames.flow, frames.hist), length)
 
 # Let's join the graph frames vertically
 frames.join.gr <- join_frames(list(frames.flow, frames.hist), ncol = 1, nrow = 2)
 frames.join.gr[[200]]
+
+# Now, let's join the joined graph frames with the spatial frames horizontally
+# in 2:1 ration and align all axis
+frames.join <- join_frames(list(frames.sp, frames.join.gr),
+                           ncol = 2, nrow = 1, rel_widths = c(2, 1), axis = "tb")
+frames.join[[200]]
