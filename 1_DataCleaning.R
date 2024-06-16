@@ -1,21 +1,21 @@
-## ----setup, include=FALSE------------------------------------------------------------------------------------------------------------------------------
+## ----setup, include=FALSE------------------------------------------------------------------------------------------------------------------------------------------------------
 knitr::opts_chunk$set(echo = TRUE)
 
 
-## ----Clean Libraries, message=FALSE, warning=FALSE-----------------------------------------------------------------------------------------------------
+## ----Clean Libraries, message=FALSE, warning=FALSE-----------------------------------------------------------------------------------------------------------------------------
 # Remove from memory
 rm(list=ls())
 
 # Load required libraries
 library(adehabitatLT)
-library(plyr)
-library(dplyr)
-library(ggplot2)
 library(lubridate)
+library(move)
 library(proj4)
+library(plyr)
+library(tidyverse)
 
 
-## ----Clean Timezone------------------------------------------------------------------------------------------------------------------------------------
+## ----Clean Timezone------------------------------------------------------------------------------------------------------------------------------------------------------------
 # TimeZone and Projection
 # Other timezones can be found at: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 Timezone1 <- "UTC"
@@ -24,10 +24,19 @@ UTM36s.proj <- "+proj=utm +zone=36 +south +ellps=WGS84 +datum=WGS84 +units=m +no
 LatLong.proj <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"  # EPSG:4326
 
 
-## ----Clean Read----------------------------------------------------------------------------------------------------------------------------------------
+## ----Clean Read, message=FALSE, warning=FALSE----------------------------------------------------------------------------------------------------------------------------------
 # Read files in Data directory (Data File and Accessory File) - FILE IS NOT SPATIAL
-wild <- read.csv("./Data/White-bearded wildebeest in Kenya.csv", header=TRUE)
-wild.ref <- read.csv("./Data/White-bearded wildebeest in Kenya-reference-data.csv", header=TRUE)
+wild <- read_csv("./Data/White-bearded wildebeest in Kenya.csv")
+wild.ref <- read_csv("./Data/White-bearded wildebeest in Kenya-reference-data.csv")
+
+# In this case, the column headers have "-" or ":" in them.  These need to be removed:
+names(wild) <- gsub("-", "", names(wild))
+names(wild) <- gsub(":", "", names(wild))
+names(wild.ref) <- gsub("-", "", names(wild.ref))
+
+# NOTE: When printing to screen, it appears that significant digits have been truncated.  This is not the case.  It is just how R prints the data
+# wild
+# wild$locationlong[1]
 
 # Look at the data and examine the data structure
 #head(wild)
@@ -36,185 +45,159 @@ wild.ref <- read.csv("./Data/White-bearded wildebeest in Kenya-reference-data.cs
 #head(wild.ref)
 #str(wild.ref)
 
+# If you have multiple files, rather than a single file with all your animals, you can do something similar to:
+# Change the wildcard (pattern) to what makes most sense to your dataset
+#wild.all <- list.files(path='./data', pattern='Kenya.csv', all.files=FALSE, full.names=TRUE)
 
-## ----Clean Merge---------------------------------------------------------------------------------------------------------------------------------------
-# Re-organize fields and create new ID field (Not entirely necessary, but useful to remove the number of columns)
-wild <- wild[,c(3:9,11,13:14)]
+# Bind files together
+#wild <- lapply(wild.all, FUN=read_csv)
+#wild <- do.call(rbind, wild)
 
-# Create an id field using the tag.local.identifier field
-# Could also simply do: wild$id <- wild$tag.local.identifier, but then need to reorganize like we did above 
-wild <- wild %>% 
-  mutate(id = tag.local.identifier) %>% 
-  relocate(id)
-#head(wild)
-
-# Look at dataframes
-#str(wild)
-#str(wild.ref)
-
-# Grab the fields you are interested in merge (easist way)
-# Merge the two datasets together (also see join in dplyr...lot's of options), including age, sex, and study study site from db2
-wild.ref <- wild.ref[,c(1,4:5,7:8,17)]
-wild <- merge(x= wild, y = wild.ref, by.x = "id", by.y = "tag.id", all.x = TRUE)
-#head(wild)
+# In most cases, you won't need to do this, but this file need a few things to be fixed
+#names(wild) <- gsub("-", "", names(wild))
+#names(wild) <- gsub(":", "", names(wild))
 
 
-## ----Clean TimeZone------------------------------------------------------------------------------------------------------------------------------------
-# Look at the timestamp
-#str(wild$timestamp)
-wild$timestamp[1:10] # Character
 
-# Format the timestamp from Timezone1 (UTC) to Timezone2 (EAT)
-# Note that I have overwritten the timestamp field here, recorded initially in GMT/UTC (time zone/time standard)
-wild$timestamp <- as.POSIXct(wild$timestamp, format = "%Y-%m-%d %H:%M:%S", tz=Timezone1) # Note the format, which is dependent on YOUR data
-attr(wild$timestamp, "tzone")
-wild$timestamp <- with_tz(wild$timestamp, tz=Timezone2) # Again, see: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
-attr(wild$timestamp, "tzone")
+## ----Clean Merge---------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Clean the reference file, selecting only the columns that you want to include
+# Important is that the file contains the deployment on and off date and times. The dates will allow us to filter/remove datapoints outside of the deployment window
+wild.ref <- 
+  wild.ref %>% 
+  transmute(id = tagid,
+            start = deployondate,
+            end = deployoffdate,
+            sex = animalsex,
+            site = studysite)
 
-# Look at the timestamp
-wild$timestamp[1:10]
-
-# Some additional examples for manipulating the time field, include:
-# ****************************************
-# ****************************************
-
-# Example 1 (same as above, but using the lubridate package and piping):
-# **********
-#wild$ts2 <- ymd_hms(wild$study.local.timestamp, tz = Timezone2) # This is the really important step, because you need to properly capture the format
-#head(wild$ts2)
-# If wanted to change back to UTC
-#wild$ts2 <- with_tz(wild$ts2, tz = Timezone1)
-#head(wild$ts2)
-
-# Or using piping and the dplyr package, you can do this in 1 step
-# wild <- wild %>% mutate(tsEAT = ymd_hms(study.local.timestamp, tz = Timezone2), tsUTC = with_tz(tsEAT, tz = Timezone1))
-# head(wild)
-
-# Example 2 (Date and Time fields are in different columns):
-# **********
-# Fields must first be appended (use paste0 or lubridate).
-# day <- c("2021-03-15", "2021-03-16", "2021-03-17", "2021-03-18", "2021-03-19")
-# time <- c("06:02:01", "09:01:00", "12:00:00", "15:03:00", "18:01:01")
-# test.data <- cbind.data.frame(day,time)
-# test.data
-
-# Using paste0
-# test.data$timestamp <- as.POSIXct(paste0(test.data$day," ", 
-#                                          test.data$time), 
-#                                   format = "%Y-%m-%d %H:%M:%S", tz = Timezone1)
-# test.data$timestamp
-
-# Using lubridate
-# test.data$timestamp2 <- as.POSIXct(lubridate::ymd(test.data$day) +
-#                                      lubridate::hms(test.data$time), tz = Timezone1)
-# test.data#timestamp2
-
-# One other good hint:
-# Use 'force_tz' to "Force" the zone without changing the actual clock time.
-
-
-## ----Missing Final-------------------------------------------------------------------------------------------------------------------------------------
-# Determine if any missing data
-# In this particular clase, we're not expecting any NA values, since the data have been clean and uploaded from Movebank
-if(all(complete.cases(wild)) == T){print("All Looking Good. No issues found")} else {
-  print("!!! Dallas, We Have a Problem !!!")
-  # Remove NA rows
-  nrow(wild)
-  wild <- wild[complete.cases(wild[,c("id","location.lat","location.long","timestamp")]),]
-  nrow(wild)
-  }
-
-
-## ----Duplicated Final----------------------------------------------------------------------------------------------------------------------------------
-# Duplicate timestamps:
-if(anyDuplicated(wild[,c("id","timestamp")]) == F){print("No Duplicates found")} else {
+# Now do the same for the tracking dataset
+# Rename/Reorganize column headers, keeping only the fields of interest
+# Change timezone to local time
+wild <- 
+  wild %>% 
+  transmute(id = taglocalidentifier,
+            name = individuallocalidentifier,
+            timeUTC = timestamp, # Keep if you want for comparison
+            timeLocal = with_tz(timestamp, tz = Timezone2), # Update timezone. Field must be a date-time object (POSIXct or other)
+            longitude = locationlong,
+            latitude = locationlat,
+            temp = externaltemperature,
+            dop = gpsdop,
+            fixtype = gpsfixtyperaw,
+            height = heightaboveellipsoid) %>% 
   
-  # Remove Duplicates
-  print(paste0("Initial Number of Records in Dataset: ",nrow(wild)))
-  print("Removing Duplicates")
-  wild  <-  wild[!duplicated(wild[c('id', 'timestamp')]),] # or wild <- wild %>% distinct(id, timestamp)
-  print(paste0("Number of Records after NA's removed: ",nrow(wild)))
-}
+  # Make sure no duplicate id and timestamp exist.
+  distinct(id, timeLocal, .keep_all = TRUE) %>% 
 
+  # Remove any records that don't have a timestamp or a Lat/Long location
+  filter(!is.na(timeLocal),
+         !is.na(latitude)) %>% 
 
-## ----Different Start Dates-----------------------------------------------------------------------------------------------------------------------------
-# Use the deploy.on/off dates in the dataframe to subset the data.
-# Convert character field to a date field
-wild$deploy.on.date <- ymd_hms(wild$deploy.on.date)
-wild$deploy.off.date <- ymd_hms(wild$deploy.off.date)
+  # Join the Reference dataset to the movement dataset
+  left_join(
+    wild.ref %>% 
+      dplyr::select(id, sex, site, start, end),
+    by = c('id' = 'id')) %>% 
 
-# Based on Northrup et al, let's update the deploy.on.date + 1 day. 
-# Alternatively, you could load in a dataframe with dates/times that you want to subset your dataframe
-unique(wild$deploy.on.date)
-wild$deploy.on.date <- wild$deploy.on.date+ days(1)
-unique(wild$deploy.on.date)
-
-# We can now use these dates to query the database
-# There maybe a simpler way to do this, but I usually use a simple loop here, executing a date query on each animal.
-
-# Create Unique ID
-Un.ID <- unique(wild$id)
-
-# Create Null Dataframe to store results
-MyAnimals <- NULL
-
-# Loop over each animal
-for(i in 1:length(Un.ID)){
-  # Subset by animal
-  #temp <- subset(wild, id == Un.ID[i])
-  temp <- wild[wild$id==Un.ID[i],] # This is simply a different way to subset or filter
+  # Now use the start and end timestamps to filter the dataset
+  # Do this specifically for each individual (group_by)
+  group_by(id) %>% 
+  filter(
+    timeLocal > start & timeLocal < end) %>% 
   
-  # Grab the unique Deploy.on.Date
-  New.Start <- unique(temp$deploy.on.date)
+  # Remove fields you don't need
+  dplyr::select(-c(start, end)) %>% 
   
-  # Subset by Un.Start
-  temp <- subset(temp, timestamp >= New.Start) # Add & clause if want to also subset by deploy.off.date (e.g., (timestamp >= New.Start & timestemp < New.End))
+  # Arrange the dataset by id and timestamp
+  arrange(id, timeLocal)
   
-  # Bind the subset together
-  MyAnimals <- rbind(MyAnimals, temp)
-}
-
-nrow(wild)
-wild <- MyAnimals # Overwriting initial dataset
-rm(MyAnimals) # Remove unneeded dataframe
-nrow(wild)
-
-# Remove unwanted Deploy Date columns
-#head(wild)
-wild <- wild[,-(12:13)]
 
 
-## ----Summary Load Data---------------------------------------------------------------------------------------------------------------------------------
+## ----Summarize, message=FALSE, warning=FALSE-----------------------------------------------------------------------------------------------------------------------------------
+# Look at the data and summarize results
+wild %>% 
+    
+  # Check on which animals included and timezone
+  group_by(id) %>% 
+  
+  # Summarize the dataset to highlight the number of records and duration of tracking period
+  summarize(
+    Records = n(),
+    #MinLat = min(latitude), MaxLat = max(latitude), MinLong = min(longitude), MaxLong = max(longitude),
+    StartDate = min(timeLocal),
+    EndDate = max(timeLocal), 
+    TrackPeriod_yrs = round(as.duration(min(timeLocal) %--% max(timeLocal)) / dyears(1), digits=1)) %>% 
+  
+  # Arrange by start date
+  arrange(StartDate, id)
+
+# Create plot
+# Not pretty at this point, but this is just a start
+ggplot(
+  data = wild,
+  mapping = aes(
+    x = longitude,
+    y = latitude,
+    color = as.factor(id))) + 
+  geom_point(shape = ".",
+             size = 3.5,
+             alpha = 0.25)
+
+
+## ----Summary Load Data, message=FALSE, warning=FALSE---------------------------------------------------------------------------------------------------------------------------
 # Plot the DOP values for confirmation.
-# For this dataset, the included identifying whether the position was 2D or 3D and then using a qualitative measure to remove poor positions
-# I was more restrictive on 2D positions (gps.dop < 5.0)
+# For this dataset, we will examine whether the position is 2D or 3D and then use a qualitative filter to remove poor positions
+# Here, I am being more restrictive on 2D positions (dop < 5.0)
 
 # Example: 
 nrow(wild)
-hist(wild$gps.dop, xlab="DOP", ylab="Frequency", main="Wildebeest GPS Data")
+ggplot(
+  data = wild,
+  aes(x = dop)) +
+  geom_histogram(color = "black", fill = "white") +
+  labs(title="Wildebeest GPS Data", x = "DOP", y = "Frequency") +
+  theme_classic()
 
-wild <- subset(wild, gps.fix.type.raw == "3D" & gps.dop < 10.0 | gps.fix.type.raw == "2D" & gps.dop < 5.0) # This doesn't do anything here because I already filtered the data
+# Filter/subset the dataset to remove problem records 
+# This won't do much here because most of these data have already been filtered
+wild <- 
+  wild %>% 
+  filter(
+    fixtype == "3D" & dop < 10.0 | fixtype == "2D" & dop < 5.0)
 
-hist(wild$gps.dop, xlab="DOP", ylab="Frequency", main="Wildebeest GPS Data")
 nrow(wild)
-# Important to inspect your own dataset to understand the fields included
+
+# Could then plot again to show the difference.
+# I'm not doing so here because I have already cleaned the data. included
+
+# ggplot(
+#   data = wild,
+#   aes(x = dop)) +
+#   geom_histogram(color = "black", fill = "white") +
+#   labs(title="Wildebeest GPS Data", x = "DOP", y = "Frequency")
+#   theme_classic()
 
 
-## ----Create Trajectory---------------------------------------------------------------------------------------------------------------------------------
+## ----Create Trajectory, message=FALSE, warning=FALSE---------------------------------------------------------------------------------------------------------------------------
 # Create matrix
-temp <-as.matrix(cbind(wild$location.long,wild$location.lat))
+temp <-as.matrix(cbind(wild$longitude,wild$latitude))
 
 # Project to UTM 36S (projection specified above) or other meter projection
 xy <- project(temp, UTM36s.proj) # This uses the proj4 package (Spatial Points File)
-#plot(xy)
 
-# Use the as.ltraj function to create individual animal trajectories. Use the infolocs command to included attributes of the dataframe.  
-# Automatically calculates the distance between succesive locations, relative and absolute turning angles (in radians), and the time interval between successive locations (in seconds)
-traj.raw <-as.ltraj(xy, date = wild$timestamp,id = wild$id, typeII = TRUE, infolocs = wild[3:14], slsp = c("remove"))
+# Calculate the distance between successive locations, relative and absolute turning angles (in radians), and the time interval between successive locations (in seconds)
+# Error message relates to using a tibble instead of a dataframe
+traj.raw <-as.ltraj(xy, 
+                    date = wild$timeLocal,
+                    id = wild$id, 
+                    typeII = TRUE, 
+                    infolocs = wild[5:8], # columns latitude, longitude, temp, dop
+                    slsp = c("remove"))
 
-# This is a list of objects
-# To view individual aniamls
-head(traj.raw[[1]])
+# Look at all animals
+plot(traj.raw)
+plot(traj.raw[1]) # Or any other animal
+traj.raw 
 
 # Notice that the dataset has no NAs.  This is because the function doesn't recognize the movement interval, something we must set.
 # In our case, the data were collected: Every hour from 6 am to 6 pm and Every three hours from 6 pm to 6 am
@@ -225,24 +208,24 @@ refda <- strptime("00:00", "%H:%M", tz=Timezone2)
 
 # Create NA values and make a regular trajectory based on refda
 traj.NA <- setNA(traj.raw, refda, 3, units = "hour") 
-traj.reg <- sett0(traj.NA, refda, 3, units = "hour")
-#is.regular(traj.reg)
 
 # Summarize Trajectory
-Summary.traj <- summary(traj.reg)
+Summary.traj <- summary(traj.NA)
 
 # Add details to the summary
-Summary.traj <- Summary.traj %>% mutate(
-  DaysTrack = signif(difftime(date.end,date.begin, units="days"),digits=2),
-  Records = nb.reloc-NAs,
-  PctComplete = signif((nb.reloc-NAs)/nb.reloc*100,digits=4),
+Summary.traj <- 
+  Summary.traj %>% 
+  mutate(
+    DaysTrack = signif(difftime(date.end,date.begin, units="days"),digits=2),
+    Records = nb.reloc-NAs,
+    PctComplete = signif((nb.reloc-NAs)/nb.reloc*100,digits=4),
 )
 
 # Look at
 Summary.traj
 
 # Convert trajectory with movement statistics to a dataframe
-wild.df <-ld(traj.reg)
+wild.df <-ld(traj.NA)
 
 # Calculate basic movement statistics.  This are just some initial statistics
 # REMEMBER: this is a 3 hour data.  Therefore, movements are simply based on the linear steps.
@@ -253,13 +236,13 @@ Mvmt.Statistics <- ddply(wild.df,"id", summarise,
 Mvmt.Statistics
 
 
-## ----Visualize-----------------------------------------------------------------------------------------------------------------------------------------
+## ----Visualize-----------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Plot trajectory using adehabitat object (list)
-plot(traj.reg[1]) # Or plot(traj.wild) to view all animals
+plot(traj.NA[1])
 
 # We can also look at the DOP over time or the how the data were collected (every X minutes)
-plotltr(traj.reg[1], "gps.dop") # Graphic of DOP over time......these should all be < 10, since we've cleaned them above
-#plotltr(traj.reg[1],"dt/60") 
+plotltr(traj.NA[1], "dop") # Graphic of DOP over time......these should all be < 10, since we've cleaned them above
+#plotltr(traj.NA[1],"dt/60") 
 
 # My preference is to create a custom plot
 # Setup a plotting layout with three panels
@@ -298,18 +281,28 @@ i <- 1 ###### Remove to loop over all animals
 #} # Uncomment
 
 
-## ----Clean Export--------------------------------------------------------------------------------------------------------------------------------------
-# Filter the data to the Mara region for analysis
-wild.Mara <- wild %>% filter(
-  study.site == "Mara")
+## ----Clean Export--------------------------------------------------------------------------------------------------------------------------------------------------------------
+# Filter the data for analysis
+wild.Mara <- 
+  wild %>% 
+  filter(
+    site == "Mara")
 
-wild.Athi <- wild %>% filter(
-  study.site == "Athi-Kaputiei Plains")
+wild.Athi <- 
+  wild %>% 
+  filter(
+    site == "Athi-Kaputiei Plains")
 
-# How many animals are included in the dataframe?  Should be 15.
+wild.Ambo <- 
+  wild %>% 
+  filter(
+    site == "Amboseli Basin")
+
+# How many animals are included in the dataframe?  Should be 15, 12, and 9.
 length(unique(wild.Mara$id))
 length(unique(wild.Athi$id))
+length(unique(wild.Ambo$id))
 
 # Save file to your Data directory for subsequent analyses
-#save(wild.Mara, wild.Athi, file = "./Data/wild.Rdata")
+save(wild.Mara, wild.Athi, wild.Ambo, file = "./Data/wild.Rdata")
 
