@@ -1,0 +1,640 @@
+---
+title: "Introduction to Resource Selection Function Models"
+author: "Jared Stabach, Smithsonian National Zoo & Conservation Biology Institute"
+date: '`r format(Sys.time(), "%d %B %Y")`'
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    number_sections: false
+    #theme: united
+    #highlight: tango
+pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<a href="https://github.com/Smithsonian/Wildebeest_RSF.git" class="github-corner" aria-label="View source on GitHub"><svg width="80" height="80" viewBox="0 0 250 250" style="fill:#151513; color:#fff; position: absolute; top: 0; border: 0; right: 0;" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a><style>.github-corner:hover .octo-arm{animation:octocat-wave 560ms ease-in-out}@keyframes octocat-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-25deg)}40%,80%{transform:rotate(10deg)}}@media (max-width:500px){.github-corner:hover .octo-arm{animation:none}.github-corner .octo-arm{animation:octocat-wave 560ms ease-in-out}}</style>
+
+# Introduction
+Habitat selection is the process by which animals use certain habitat types/resources. If an animal is located in a habitat type more than would be expected by random, then it is assumed that the animal is selecting for the habitat.  In contrast, if an animal uses a particular habitat/resource less than it's availability, it is assumed that the animal avoids or does not prefer the habitat/resource.  Determining habitat use patterns is critical to the effective management and conservation of animals.  Global positioning system data allow fine-scale assessments of habitat selection.  These data are typically analyzed in a resource selection function (RSF) or step selection function (SSF) framework.  In each of these cases, animal *'use'* locations are contrasted with random locations (the *'availability'* sample).  Differences, however, exist between these two frameworks, which importantly include how much or how little (or at all) the movement process is included.  RSF models are point-process models where the movement process is largely ignored, with many arguing that a step selection function more effectively incorporates the movement process.  I believe that both frameworks can be used effectively, dependent on your research question and scale of inference.  
+
+In this script, we'll introduce the basic approach to Resource Selection Function (RSF) modeling. We'll integrate the wildebeest dataset that we've been using in the past few exercises to conduct a point-based analyses to evaluate habitat suitability.  This vignette is meant as a first-step towards more complex models which incorporate the animal movement process.  We will be relying primarily on the functionality provided for RSF analysis by the package [amt](https://cran.r-project.org/web/packages/amt/index.html). We'll address the following objectives here:
+
+  * Some habitats are preferred over other habitats
+  * **Resource Selection Functions** quantify preference and avoidance
+  * The general strategy is to compare *'used'* locations (GPS data, presence locations) with locations that are *'available'* (pseudo-absence)
+    + Incorporate raster layers that are thought *a-priori* to affect space use
+    + Generate a random sample of availability
+    + Extract raster values at each 'use' and 'available' location
+    + Perform logistic regression 
+    $$ log[p_i/(1-p_i)] = logit(p_i) = \beta_0 + \beta_1x_1 + \beta_2x_2 + ...+ \beta_nx_n $$
+    and
+    $$ p_i = \frac{exp(\beta_0 + \beta_1x_1 + \beta_2x_2 + \beta_3x_3 + ... + \beta_nx_n)}{1+exp(\beta_0 + \beta_1x_1 + \beta_2x_2 + \beta_3x_3 + ... + \beta_nx_n)}$$
+    But, for use/availablity designs, we drop the intercept (its meaningless), and focus only on:
+    $$ w(x,\beta) = exp(\beta_1x_1 + \beta_2x_2 + ...+ \beta_nx_n)$$
+    + Positive $\beta$'s indicate preference; Negative $\beta$'s indicate avoidance
+    + Generate a map, providing a prediction of habitat use
+    
+We'll be following details provided in the following publications:
+
+Fieberg, J., J. Signer, B. Smith, and T. Avgar. 2021. A ‘How to’ guide for interpreting parameters in habitat‐selection analyses. [Journal of Animal Ecology 00:1-17](https://besjournals.onlinelibrary.wiley.com/doi/10.1111/1365-2656.13441).
+
+Signer, J., J. Fieberg, and T. Avgar. 2019. Animal movement tools (amt): R package for managing tracking data and conducting habitat selection analyses. [Ecology and evolution 9(2): 880-890](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6362447/).
+
+Stabach, J.A., G. Wittemyer, R.B. Boone, R.S. Reid, J.S. Worden. 2016. Variation in habitat selection by white-bearded wildebeest across different degrees of human disturbance. [Ecosphere 7(8)](https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/ecs2.1428).
+
+## Setup
+```{r RSF Libraries, message=FALSE, warning=FALSE}
+# Remove everything from memory
+rm(list=ls())
+
+# Set.seed - This function means that any generation of "random" points/numbers will be the same each time you run the script.
+set.seed(533)
+
+# You may need to install these packages first
+#install.packages('amt', 'tidyverse', 'lme4', 'terra', 'sf', 'sjPlot', 'usdm', 'visreg', 'tmap', 'AICcmodavg')
+
+# Load libraries
+#library(dplyr)
+#library(ggplot2)
+#library(jtools)
+library(amt)
+library(tidyverse)
+library(lme4)
+library(terra)
+library(sf)
+library(sjPlot) # provide plot_model()
+library(usdm)
+library(visreg) # provides vis_reg() for plotting response curves
+library(tmap)
+library(AICcmodavg) # provides aic_tab() 
+
+# Set all tmaps to plot in view mode
+tmap_mode("view")
+```
+  
+## Load Data
+Read in all the spatial data.  The animal movement data is a 'flat' dataframe (a non-projected file) with coordinates that have been extracted in UTM 37 S, WGS84 (previous exercise).  The raster layers are projected to Albers Equal Area.
+
+Note, the projection used doesn't matter too much, as long as you are consistent between the data layers (point and raster) you are using.  Important to use a projection that minimizes the amount of distortion across your study area.
+
+```{r RSF Load}
+# Load all raster layers for Athi-Kaputiei Plains study area.  The raster stack consists of 7 raster layers.  To be in a stack they all have to have the exact same resolution (250-m) and spatial extent. 
+rsf.stack <- terra::rast("data/ak_raster_stack.tif")
+plot(rsf.stack)
+
+# Data Layers included:
+# anth_risk - Anthropogenic Risk, simply an index of human footprint made specifically for this ecosystem (expected negative response)
+# Fence_dist - Fence Distance, with fences manually mapped by a Kenyan field team (expected negative response)
+# prirds_dist - Primary Road Distance, the distance from primary/paved roads (expected negative response)
+# secrds_dist - Secondary Road Distance, the distance from secondary/unpaved roads (expected null response)
+# river_dist - River Distance, the distance from permanent rivers (depending on season, but wildebeest must drink - greater attraction in dry season, but a predation risk)
+# waterpts_dist - Water Point Distance, the distance to mapped water wells (expected positive response, stronger in dry season)
+# woody_dist -Woody Distance, the distance to woody vegetation (based on VCF) (expected negative response - predation risk)
+
+# The fence plot is hard to interpret because there are so many low values in the center of the plot. This means there are a lot of fences there. Let's color the distance values and only show the first 100 to better see where the fences are located.
+plot(rsf.stack$fence_dist)
+terra::plot(rsf.stack$fence_dist,
+            range = c(0, 100),
+            col = "black")
+
+# We can review the range of values in each raster like this.
+summary(values(rsf.stack$fence_dist))
+
+# What is the crs of the raster stack?
+crs(rsf.stack, proj=TRUE)
+
+# *******************************
+# Now let's import the GPS tracking dataset.  
+# This is the 3-hour, regular trajectory.
+# Let's import and remove the trajectory information
+# We also need to remove the na values in the x/y coordinates
+WB.data <- read_rds("Data/wildebeest_3hr_adehabitat.rds") %>% 
+  select(x,
+         y,
+         date,
+         id,
+         sex) %>% 
+  filter(!is.na(x),
+         !is.na(y),
+         !is.na(date))
+
+# Is this a spatial object?
+#class(WB.data)
+# Is it projected?
+#st_crs(WB.data)
+# What is the timezone?
+#tz(WB.data$date)
+
+# Here's where we need to be careful.
+# Our raster layers are projected to Albers Equal Area.  Our point layer is not projected, but the x/y coordinates are derived from when the layer was projected to UTM 37S, WGS84.
+# This means we should sent the file to UTM37S, WGS84 and project to Albers Equal Area
+WB.data.sf <- WB.data %>%  
+  st_as_sf(coords = c('x', 'y'),
+           crs = "EPSG:32737") %>% # This is UTM 37S, WGS84 (UtmZone.proj <- "EPSG:32737")
+  st_transform(crs(rsf.stack)) # Easiest way to set the project is grab it from the crs of our already defined raster stack
+
+# The specific project is Albers Equal Area, specific to Africa.  This would be defined as:
+#AEA.Africa.proj <- "+proj=aea +lat_1=20 +lat_2=-23 +lat_0=0 +lon_0=25 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+
+# Now what's the CRS?
+st_crs(WB.data.sf)
+
+# Let's plot to make sure everything is aligned.
+# Here I'm choosing to plot with a sequential palette with 10 colors on the ramp. You can run tmaptools::palette_explorer() to explore the palette options. 
+tm_shape(rsf.stack$anth_risk,
+         name = "Human Risk Level") +
+  tm_raster(palette = "YlOrRd", n = 10,
+            alpha = 0.6,
+            title = "Anth. Risk") +
+  tm_shape(WB.data.sf %>% 
+             filter(id == "Noontare"),
+           name = "Noontare Locations") +
+  tm_dots(size = 0.01,
+          col = "black") + 
+  tm_layout("Example Graph")
+
+# This first raster represents anthropogenic risk. And you can see that this wildebeest appears to be responding to this variable. If you zoom into the northern locations, as there are no locations in the areas of elevated human risk.
+
+# Let's plot one more. Let's look at this wildebeest's points with distance to primary road. Here I want the low values to be red, instead of the high values, so I'm reversing the palette with the "-". I'm also including a lot more colors, otherwise it was difficult to see where the roads actually were. This makes the legend too large though so I'm hiding the legend for the raster.
+
+# tm_shape(rsf.stack$prirds_dist,
+#          name = "Distance to Primary Rd") +
+#   tm_raster(palette = "-YlOrRd", n = 30,
+#             alpha = 0.6,
+#             legend.show = FALSE) +
+#   tm_shape(WB.data.sf %>%
+#              filter(id == "Noontare"),
+#            name = "Noontare Locations") +
+#   tm_dots(size = 0.01,
+#           col = "gray")
+
+# Check tmap_options()
+# This is where the default basemaps are set.  This is why we see ESRI.WorldGrayCanvas, OpenStreetMap, and ESRI.WorldTopoMap
+```
+
+# Fitting a Model for a Single Animal
+Here will take the first initial steps to fit a RSF to a single individual using the [amt](https://cran.r-project.org/web/packages/amt/index.html) package.
+
+## Prepare Data for Modeling
+[Amt](https://cran.r-project.org/web/packages/amt/index.html) relies heavily on piping, which has a bit of a (steep) learning curve, but can really help in streamlining the data processing workflow. We'll start by creating a trajectory (called a track in [amt](https://cran.r-project.org/web/packages/amt/index.html)).
+
+Remember also that RSF analyses assume statistical independence between locations and habitat covariates. We could provide a very conservative estimate of time to independence using [ctmm](https://cran.r-project.org/web/packages/ctmm/index.html) and then resample our data to some interval greater interval than this time scale.  This will surely reduce our sample size.  For now, we will move forward with the 3 hour interval, reasoning that all measured covariates can change significantly in 3 hours of movement.
+
+```{r Create Subset, message=FALSE, warning=FALSE, echo=TRUE}
+# Create Subset of dataset, filtering to 1 animal
+nt <- WB.data.sf %>% 
+  mutate(x = st_coordinates(WB.data.sf)[ ,1],
+         y = st_coordinates(WB.data.sf)[ ,2]) %>% 
+  as_tibble() %>% 
+  select(-geometry) %>%  
+  filter(id == "Ntishya") %>% 
+  mutate(id = droplevels(id))
+  
+# Create Movement Track (similar to ltraj function in adehabitatLT)
+# We don't really need the time component for this initial analysis.  That would be a step-selection function (ssf) analysis.
+nt.trk <- mk_track(nt, 
+                   .x = x, 
+                   .y = y,
+                   .t = date, 
+                   crs = crs(WB.data.sf), # Alternative just include crs = 9822.  9822 is the EPSG code for AEA.
+                   order_by_ts = T,
+                   id = id, 
+                   sex = sex)
+
+# Note that amt does not calculate steplengths or turning angles when you make the track.  To do so, you'd need to specify those variables:
+# nt.trk.test <- nt.trk %>% 
+#   mutate(
+#     sl = step_lengths(.),
+#     ta = direction_abs(.) # absolute and relative turing angles can be calculated (direction_rel())
+#     )
+
+# Remember also that the track should be kept regular, otherwise we have potential to bias our results (e.g., more points in the day than at night). Our track has already been resampled to a 3 hour interval in a previous lecture
+# In AMT, we would do this by using the track_resample command, making our track regular
+nt.trk.rs <- track_resample(nt.trk,
+                            rate = hours(3), 
+                            tolerance = minutes(20))
+
+# Example of how you could thin your data  
+# rcd.amt <- ceiling(nrow(nt.trk.rs)*0.20) # ceiling just rounds up to a whole number
+# nt.trk.rs.demo <- nt.trk.rs[sample(1:nrow(nt.trk.rs),size = rcd.amt),c("id","x_","y_","id","sex")]
+```
+  
+## Defining Availability
+Perhaps the most important aspect of any habitat selection analysis is the assessment of availability.  In a RSF, the assumption is that the distribution of available habitat is constant through time and that the animal has equal access to **ALL** areas within a user-defined area (Type III Habitat Selection).  This assumption may hold true when positions are observed infrequently (the case more commonly when data were collected infrequently from VHF studies), but less so with many modern telemetry studies.
+
+The goal here, however, is to contrast points where an animal was observed with locations that were potentially available.  To do so, we will create pseudo absence points generated throughout an animals' MCP home range.  The [amt](https://cran.r-project.org/web/packages/amt/index.html) function `random_points` is a convenient way to do this.
+
+```{r Availability, message=FALSE, warning=FALSE, echo=TRUE}
+# Here we are generating 10 times the number of "Use" points to get our list of "available" points. We'll start with this level to begin to inspect our data and look for initial patterns. Before running our final models we'll assess what a robust minimum # of available points should be.
+nt.rsf.10 <- random_points(nt.trk.rs,
+                      n = nrow(nt.trk.rs) * 10,
+                      type ="regular") # Also could be "random"
+
+# Where are these points located? 
+# Within the 100% MCP home range.  That's the only option currently in the package.
+# To generate points within a user defined polygon, we'd need to use st_sample().
+
+# What does our dataset look like now?
+head(nt.rsf.10)
+# Cool, the function created a 'case_' field, tracking our 'Use' points (TRUE) and our 'Availability' points (FALSE)
+
+# Summarize
+table(nt.rsf.10$case_)
+#class(nt.rsf.10)
+
+# Plot Use/Availability
+plot(nt.rsf.10) 
+
+# Assign weights to our available available points, making extremely high.
+nt.rsf.10 <- nt.rsf.10 %>% 
+  mutate(w = ifelse(case_ == T, 
+                    1, 
+                    5000)) 
+```
+
+## Extract Covariates
+# Here we extract the value of each raster file for each tracking location and each random location. This is something you can do individually with spatial files using various commands either in sf or terra depending on the type of file. For rasters it is the terra::extract() function. This can be done with one line of code when we have our rasters in a stack. The extract_covariates() function in amt calls this terra::extract function.
+
+```{r Extract, message=FALSE, warning=FALSE, echo=TRUE}
+# Extract all the raster variables at all Use/Available points.
+# Nice that this is done all with a single command....and very quickly.  Amazing!
+# NOTE: we are not considering time here - see extract_covariates_var_time() function to do so, a bit more complicated
+nt.rsf.10 <- nt.rsf.10 %>% 
+  extract_covariates(rsf.stack)
+
+# Look at result
+head(nt.rsf.10)
+#names(nt.rsf.10)
+
+# Now let's summarize some of these results
+# Now we should get some general sense of how values compare between the use and available locations.
+# One way to visualize this is to look at the frequency distributions of each covariate, compared between use and available locations. This is the equivalent of a histogram, but with lines. Here is an example for one covariate, and this indicates more higher values of anthropogenic risk for the false/available values.
+
+ntishya_rsf_10 %>% 
+  ggplot(aes(x = anth_risk,
+             after_stat(density),
+             col = case_)) + 
+  geom_freqpoly(size = .7) 
+
+# You may have many covariates, so doing this in a loop makes sense. First I'm making a vector of my variable names.
+
+vars <- ntishya_rsf_10 %>% 
+  select(anth_risk:woody_dist) %>% 
+  names()
+
+# Then I'm creating a list of plots using the purrr::map() function. 
+
+hist_plots <- map(vars, ~
+                    
+                    ntishya_rsf_10 %>% 
+                    select(case_, var = .x) %>% 
+                    ggplot(aes(x = var,
+                               after_stat(density),
+                               col = case_)) + 
+                    geom_freqpoly(size = .7,
+                                  bins = 30) + 
+                    labs(title = .x))
+
+# Then I put all the plots in one grid. You'll need to expand this plot to view all the patterns clearly.
+
+cowplot::plot_grid(plotlist = hist_plots)
+
+# We may also want to use boxplots for this. 
+
+box_plots <- map(vars, ~
+                   
+                   ntishya_rsf_10 %>% 
+                   select(case_, var = .x) %>% 
+                   ggplot(aes(y = var,
+                              col = case_)) + 
+                   geom_boxplot() + 
+                   labs(title = .x))
+
+cowplot::plot_grid(plotlist = box_plots)
+
+# Of course we could spend more time making these plots look nicer, but they are meant to give us some general sense of patterns, and potential problems, in the data. Other patterns for example are that use locations tend to be closer to major roads...remember this is all based on one individual at this point.
+```
+
+### Assess Collinearity
+Similar to analyses with Addax, we need to assess if potential collinearity issues exist between variables.
+
+**Question:** What to do if no collinearity issues exist, but there is a high level of correlation between certain variables?
+
+```{r Collinearity}
+# Assess collinearity
+test.corr <- as.data.frame(wb_RSF)
+vifstep(test.corr[,4:10]) # VIF indicates no collinearity problem, but there is a high level of correlation (max: 0.84)
+cor(test.corr[,4:10])
+
+# How to address?  Should they be removed or are we less concerned?
+# Let's fit different models and see how the standard error of our included variables changes between fitted models
+# Notice I have scaled the variables
+MA <- glm(case_ ~ scale(anth_risk) + scale(fence_dist) + scale(waterpts_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), family = binomial(link="logit"), 
+     data =wb_RSF)
+summary(MA)
+
+# Remove waterpts_dist
+MB <- glm(case_ ~ scale(anth_risk) + scale(fence_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), family = binomial(link="logit"), 
+     data =wb_RSF)
+summary(MB)
+
+# Remove fence_dist
+MC <- glm(case_ ~ scale(anth_risk) + scale(waterpts_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), family = binomial(link="logit"), 
+     data =wb_RSF)
+summary(MC)
+
+# Look at coefficients
+tab_model(MA,MB,MC, show.se=T, transform=NULL)
+
+# Out of curiosity, how to models compare 
+AIC(MA,MB,MC)
+```
+
+### How Many Points is Enough?
+Before we move on to final model fitting, we must first the address the question of whether or not we have adequately sampled "Availability".  Ultimately, this is a trade-off between statistical robustness and computer processing time.  I generally perform this on a single individual as evidence that I am appropriately sampling from availability.
+
+The process simply entails "looping" over a differ set of availability (from 1 "Available" point per "Use" point to 100 "Available" points per "Use" point).  We will use a nested structure, rather than the "for loop" structure, that we have demonstrated in previous exercises.  For this complicated process, I think the nested structure is a bit easier.  We then do this process multiple times, so that the "Available" points differ and so we can evaluate how much the coefficients change between model fittings.
+
+**NOTE: THIS CAN TAKE A LONG TIME BECAUSE YOU ARE FITTING MULTIPLE DIFFERENT MODELS WITH MANY DATA POINTS**
+
+```{r Sensitivity}
+# Exploring sensitivity of RSF coefficients to the number of available points
+
+# Setup number of available locations to sample
+n.frac <- c(1, 5, 20, 50, 100) 
+
+# Total available locations to be generated, based on the number of Use points
+n.pts <- nrow(wb) * n.frac
+
+# Number of replicates of each available location (1,5,20,50,100)
+# This is number of times each model will be fit, allows to calculate variability
+# For a publication, I would increase the n.rep to 100
+n.rep <- 20
+
+# Create a table which can hold the n.reps
+# Extract covariates from rsf.stack
+# Rename the variables
+# Fit glm model for each available location (1,5,20,50,100) and for each replication (re-sampling)
+
+# Commenting out because the process is time consuming
+# *******************************************
+# *******************************************
+# wb.sim <- tibble(
+#   n.pts = rep(n.pts, n.rep), 
+#   frac = rep(n.frac, n.rep), 
+#   result = map(
+#     n.pts, ~
+#       wb %>% random_points(n = .x) %>%
+#       extract_covariates(rsf.stack) %>%
+#       mutate(anth_risk= scale(anth_risk),
+#              woody_dist = scale(woody_dist),
+#              fence_dist = scale(fence_dist),
+#              prirds_dist = scale(prirds_dist),
+#              river_dist = scale(river_dist),
+#              secrds_dist = scale(secrds_dist),
+#              waterpts_dist = scale(waterpts_dist)) %>%
+#       glm(case_ ~ anth_risk + woody_dist + fence_dist + prirds_dist + river_dist + secrds_dist + waterpts_dist,
+#           data = ., family = binomial(link = "logit")) %>%
+#       tidy()))
+
+wb.sim # We see the structure has 100 rows (n.frac (5) x n.rep (20) = 100) # File loaded at the beginning of script
+#str(wb.sim)
+wb.sim$result[[1]]
+
+# We now "unnest" the results to plot the coefficient estimates from individual model fits with different sets of available data (1,5,20,100) 
+wb.sim %>% unnest(cols = result) %>% 
+  mutate(wb.sim = recode(term, "(Intercept)"="Intercept",
+                         anth_risk = "Anthropogenic disturbance", 
+                         woody_dist = "Woody Distance",
+                         fence_dist = "Fence Distance", 
+                         prirds_dist = "Pri Rds Distance",
+                         river_dist = "River Distance",
+                         secrds_dist = "Sec Rds Distance",
+                         waterpts_dist = "Water Point Distance")) %>% 
+  ggplot(aes(factor(frac), y = estimate)) +
+  geom_boxplot() + facet_wrap(~ wb.sim, scale  ="free") +
+  geom_jitter(alpha = 0.2) + 
+  labs(x = "Number of available points (multiplier of no. of used locations)", 
+       y = "Estimate") +
+  theme_light()
+```
+
+### Model Fitting
+Based on the model fitting simulations, we will generate 50 available locations per use location.  More would be better, but there is seemingly little change between model fits.  We will follow the same process described above.
+
+Here the intercept decreases as the number of available points increases, but the slope parameter estimates, on average, do not change much once we included at least 20 available points per used point.  We conclude, at least in this particular case, 20 available points per used point is sufficient for interpreting the slope coefficients.  We will follow the same process described above to generate random points, variable extraction, and model fitting.  We then plot the parameter responses.
+
+```{r RSF 50}
+# Generating 50 available locations per each used location within animal homerange
+wb_RSF50 <- random_points(wb,n=nrow(wb)*50,typ="random")
+
+# Extracting the covariates
+wb_RSF50 <- wb_RSF50 %>% extract_covariates(rsf.stack)
+
+# Fitting model
+M2 <- glm(case_ ~ scale(anth_risk) + scale(fence_dist) + scale(waterpts_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), 
+         family = binomial(link="logit"), 
+         data =wb_RSF50)
+# Get Summary & confidence intervals
+summary(M2)
+confint(M2)
+
+# Plot coefficients (an easy alternative to coefplot - THANKS Pawel!!)
+plot_model(M2,transform = NULL) 
+
+# There are multiple ways to graph the response curves.  In addition to visreg, we could also plot using jtools or sjplot (many others)
+visreg(M2,"anth_risk",
+       scale="response", 
+       ylab="Relative Selective Strength",
+       xlab="Anthropogenic risk",
+       partial=F,
+       rug=F,
+       line=list(col="black"), 
+       fill=list(col="light gray"))
+
+# Let's loop over all the variables
+par(mfrow=c(2,4))
+var1 <- c("anth_risk","fence_dist","waterpts_dist","prirds_dist","river_dist","secrds_dist","woody_dist")
+var2 <- c("Anthropogenic Risk","Fence Distance","Water Point Distance","Primary Roads Distance","River Distance","Secondary Roads Distance","Woody Distance")
+
+par(mfrow=c(2,4))
+for (i in 1:length(var1)){
+visreg(M2,var1[i],
+       scale="response", 
+       ylab="Probability of Selection",
+       xlab=var2[i],
+       partial=F,
+       rug=F,
+       line=list(col="black"), 
+       fill=list(col="light gray"))
+}
+par(mfrow=c(1,1))
+```
+
+### Generate Model Prediction
+Last step is to generate a predictive surface of habitat suitability.  First step is to extract the coefficients of each predictor included in the model summary.  We can't use `Predict` in this case, because we want to ignore the intercept.  Remeber that we **must** scale the reaster values when making the prediction, since our coefficient estimates are based on scaled variables.
+
+```{r Prediction}
+# Extract the coefficient of each predictor from the model summary
+coeff <- M2$coefficients
+
+# Then, use the logistic equation to generate predictions (no B_0)
+# w*(x)=exp(β1x1 + β2x2 +.... + βnxn)/exp(1 + β1x1 + β2x2 +.... + βnxn)
+
+# where w*(x) is the relative probability of selection, dependent upon covariates X1 through Xn, and their estimated regression coefficients β1 to βn, respectively.
+
+# Remember that we must scale the raster layers too:
+anth.scale <- (anth_risk - mean(wb_RSF50$anth_risk)) / sd(wb_RSF50$anth_risk)
+fence.scale <- (fence_dist - mean(wb_RSF50$fence_dist)) / sd(wb_RSF50$fence_dist)
+water.scale <- (prirds_dist - mean(wb_RSF50$prirds_dist)) / sd(wb_RSF50$prirds_dist)
+prirds.scale <- (secrds_dist - mean(wb_RSF50$secrds_dist)) / sd(wb_RSF50$secrds_dist)
+river.scale <- (river_dist - mean(wb_RSF50$river_dist)) / sd(wb_RSF50$river_dist)
+secrds.scale <- (waterpts_dist - mean(wb_RSF50$waterpts_dist)) / sd(wb_RSF50$waterpts_dist) 
+woody.scale <- (woody_dist - mean(wb_RSF50$woody_dist)) / sd(wb_RSF50$woody_dist) 
+
+# Prediction
+pred <- exp(anth.scale*coeff[[2]]+ fence.scale*coeff[[3]] + water.scale*coeff[[4]] + prirds.scale*coeff[[5]] + river.scale*coeff[[6]] + secrds.scale*coeff[[7]] + woody.scale*coeff[[8]])/(1+exp(anth.scale*coeff[[2]]+ fence.scale*coeff[[3]] + water.scale*coeff[[4]] + prirds.scale*coeff[[5]] + river.scale*coeff[[6]] + secrds.scale*coeff[[7]] + woody.scale*coeff[[8]]))
+
+# Provide Spatial Prediction - Based off of the coefficients from this single animal
+plot(pred)
+
+# We could then mask this data layer, and then use tmap an place the layer on top of a map service (like we did with the Addax)
+# We loaded a spatial polygon data layer at the start of this script named "Athi_Bound"
+# Create new layer and crop it to the analysis extent
+pred.30077 <- mask(pred, Athi_Bound)
+pred.30077 <- crop(pred.30077,y=extent(Athi_Bound))
+plot(pred.30077)
+
+# Save this file in your data directory
+save(pred.30077, file="./Data/Prediction30077.Rdata")
+```
+
+## Fitting a Model for Multiple Animals
+More than likely, you will have multiple tagged animals and will be interested in investigating resource use across your entrepopulation (or interested in differences in selection between different populations). This can be accomplished in multiple ways:
+
+* Two-stage approach
+  + Fit a glm model for each individuals
+  + Average the coefficients
+* Account for individual random effects
+  + Generalized Linear Mixed Effects Regression (GLMER)
+  
+### Two Stage Approach
+The two stage approach follows the same procedure as described above, except that you would select additional animals and fit a GLM to each individual.  You could then output the summary coefficients and either apply the mean of your coefficients (e.g., `mn.coeff.anth = mean(c(model1.coeff.anth, model2.coeff.anth, model3.coeff.anth))`) to the scaled raster layers or create individual predictions and calculate the mean of the predictive surfaces. Estimating the variance between animals, however, is very difficult.  Model structures must be exactly the same between individuals in order to make comparisons.
+
+Example of the command to calculate the mean of predictions from multiple animals:
+
+`mean.pred <- mean(pred.mask.Animal1,pred.mask.Animal2,pred.mask.Animal3)`
+
+### Generalized Linear Mixed Effects Regression
+Mixed effects models are commonly used to provide estimates of the population.  The same process as described above is used, but the model structure is slightly more complicated.  [Amt]() provides a nice structure for creating random points, with a simple process for annotating points with underlying environmental layers.  This information is being provided to those that have animal tracking datasets and plan to work on analyses.
+
+#### Generating Use/Availability
+The dataframe needs to be converted to a list, with a dataframe for each animal.  The `lapply` command can then be used to make a track (`mk_track`) and generate a set of random points (`random_points`).
+
+```{r GLMER, eval=F, echo=T}
+# Create object of ids
+wild.An <- unique(wild.Athi$id)
+# Creating list that contain the dataframe for each individual
+wild.Athi<-split(wild.Athi,wild.Athi$id)
+
+# Creating track for each individual animal in the list
+wild.track <- lapply(wild.Athi, function(x) mk_track(x,
+         .x=easting,.y=northing,
+         .t=timestamp,crs = sp::CRS(AEA.Africa.proj)))
+
+# Let's reduce the file, selecting only 20% of each use dataset
+wild.track <- lapply(wild.track, function(x) x[sample(1:nrow(x),size = ceiling(nrow(x)*0.20)),c("x_","y_","t_")])
+
+# Generate 50 random points for each animal 
+# Using a list apply here to apply the function
+wb.Athi <- lapply(wild.track, function(x) random_points(x, n=nrow(x) * 50,typ="random"))
+```
+
+#### Extract Environmental Variables
+We can then extract the relevant base layer information at each data point, similar to above, but by applying the `extract_covariates` to the list.
+
+```{r GLMER Extract, eval=F, echo=T}
+# Adding anthropogenic risk covariate to each dataframe by using extract_covariates function
+wb.Athi <- lapply(wb.Athi, function(x) extract_covariates(x, rsf.stack))
+
+# Adding animal ID to each dataframe in the list.  We'll use this as the random effect.
+wb.Athi <- mapply(cbind, wb.Athi, "Animal_ID" = wild.An, SIMPLIFY=F) 
+
+# Binding all dataframes in the list into a single dataframe for analysis
+wb.Athi <- do.call(rbind,wb.Athi)
+```
+
+### Model Fitting
+The model structure looks similar to what we have already done together, except we are now adding a random effect (1|Animal)
+
+```{r GLMER Fit, eval=F, echo=T}
+# This model will be slow to execute
+mixed.model <- glmer(case_ ~ scale(anth_risk) + scale(fence_dist) + scale(waterpts_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist) + (1|Animal_ID), 
+                family = binomial(link="logit"), 
+                data = wb.Athi)
+
+# Print Model Summary
+summary(mixed.model)
+```
+
+#### Create Parameter Responses
+Similar to earlier exercises, graph and interpret results
+
+```{r GLMER Response, eval=F, echo=T}
+# Plot coefficients and response curves for inference at the population level
+plot_model(mixed.model,transform = NULL) 
+
+# Exponentiate the coefficients and plot the odds ratios
+tab_model(mixed.model)
+plot_model(mixed.model) 
+
+# Graph response curves.  Use effect plot from jtools.  Executes much quicker
+effect_plot(mixed.model,data=wb.Athi, 
+            pred=anth_risk,interval = TRUE,
+            x.label = "Anthropogenic risk",
+            y.label = "Relative Selection Strength") + 
+  theme_classic()
+```
+
+#### Generate Model Prediction
+Recalculate the scaled rasters and predict a surface
+
+```{r GlMER Prediction, eval=F, echo=T}
+# Extract the coefficient of each predictor from the model summary
+coef <- summary(mixed.model)
+coeff <- coef$coefficients
+
+# Scale rasters:
+anth.scale <- (anth_risk - mean(wb.Athi$anth_risk)) / sd(wb.Athi$anth_risk)
+fence.scale <- (fence_dist - mean(wb.Athi$fence_dist)) / sd(wb.Athi$fence_dist)
+water.scale <- (prirds_dist - mean(wb.Athi$prirds_dist)) / sd(wb.Athi$prirds_dist)
+prirds.scale <- (secrds_dist - mean(wb.Athi$secrds_dist)) / sd(wb.Athi$secrds_dist)
+river.scale <- (river_dist - mean(wb.Athi$river_dist)) / sd(wb.Athi$river_dist)
+secrds.scale <- (waterpts_dist - mean(wb.Athi$waterpts_dist)) / sd(wb.Athi$waterpts_dist) 
+woody.scale <- (woody_dist - mean(wb.Athi$woody_dist)) / sd(wb.Athi$woody_dist) 
+
+# Prediction
+pred.mixed <- exp(anth.scale*coeff[[2]]+ fence.scale*coeff[[3]] + water.scale*coeff[[4]] + prirds.scale*coeff[[5]] + river.scale*coeff[[6]] + secrds.scale*coeff[[7]] + woody.scale*coeff[[8]])/(1+exp(anth.scale*coeff[[2]]+ fence.scale*coeff[[3]] + water.scale*coeff[[4]] + prirds.scale*coeff[[5]] + river.scale*coeff[[6]] + secrds.scale*coeff[[7]] + woody.scale*coeff[[8]]))
+
+# Provide Spatial Prediction - Based off of the coefficients from this single animal
+plot(pred.mixed)
+
+# We could then mask this data layer, and then use tmap an place the layer on top of a map service (like we did with the Addax)
+# We loaded a spatial polygon data layer at the start of this script named "Athi_Bound"
+# Create new layer and crop it to the analysis extent
+pred.mixed.mask <- mask(pred.mixed, Athi_Bound)
+pred.mixed.mask <- crop(pred.mixed.mask,y=extent(Athi_Bound))
+plot(pred.mixed.mask)
+```
+
+# Next Steps/Key Questions
+* How to incorporate the animal's movement into the size of the buffer (SSF analysis)?
+* How to create multiple competing hypotheses and select the best model based on AIC?
+* Does it make sense to assume simple linear effects on distance measures?
