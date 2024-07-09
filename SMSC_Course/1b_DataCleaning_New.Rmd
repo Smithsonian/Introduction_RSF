@@ -1,0 +1,391 @@
+---
+title: "Introduction to Animal Movement Analyses"
+author: "Jared Stabach, Smithsonian Conservation Biology Institute"
+date: '`r format(Sys.time(), "%d %B %Y")`'
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    number_sections: false
+    #theme: united
+    #highlight: tango
+pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+  >Example: White-bearded wildebeest (2010-2013)
+  
+We will use a dataset collected during my PhD field research in Kenya from 2010-2013.  These data are freely available on [Movebank](https://www.movebank.org/) and consist of 36 adult white-bearded wildebeest (*Connochaetes taurinus*) fitted with Lotek WildCell^TM^ GPS tracking devices and tracked across three separate and distinct ecosystems (Amboseli, Athi-Kaputiei Plains, and the Greater Mara).  Known to be particularly important to ecosystem function and diversity, many resident populations of wildebeest have become threatened with extinction over the past few decades.  The goal of this research was to understand how natural and anthropogenic change were affecting wildebeest.
+
+These data can be referenced as:
+
+Stabach JA, Hughey LF, Crego RD, Fleming CH, Hopcraft JGC, Leimgruber P, Morrison TA, Ogutu JO, Reid RS, Worden JS, Boone RB. 2022. Increasing anthropogenic disturbance restricts wildebeest movement across East African grazing systems. Frontiers in Ecology and Evolution. [doi.org/10.3389/fevo.2022.846171](https://doi.org/10.3389/fevo.2022.846171)
+
+Stabach JA, Hughey LF, Reid RS, Worden JS, Leimgruber P, Boone RB. 2020. Data from: Comparison of movement strategies of three populations of white-bearded wildebeest. Movebank Data Repository. [doi:10.5441/001/1.h0t27719](https://www.datarepository.movebank.org/handle/10255/move.1095)
+
+<div style="float:right">
+<img width="270" height="176" src="Mvmt.png">
+</div>
+
+In this excercise and those that follow, you will:
+
+  * Import and clean an animal movement trajectory
+  * Visualize the data and provide summary plots of the animal movements
+  * Calculate an estimate of an animal's home range using the Continuous-Time Movement Modeling (CTMM) Framework
+  
+# Initial Data Cleaning
+Technological advancements over the past few decades have led to an exponential increase in the amount and quality of data collected on animals.  As an example, modern GPS units can now collect the position of animals, anywhere on the planet, with a precision of 2-10 meters.  In some cases, these data can be collected every hour, every minute, or even every second.  This, of course, means that these data are no longer independent, requiring advanced modeling techniques to analyze the data.
+
+As a first step, we must first clean the data received before taking any additional advanced steps. This includes filtering the dataset for completeness, identifying duplicate records, removing invalid start or stop dates, and identifying positions of poor data quality.  Nearly all manufacturers report some type of positional quality, often reported as the type of position (e.g., 1D, 2D, or 3D) or Dilution of Position (DOP - horizontal or vertical).  Large DOPs indicate poor positional quality and can be easily filtered from the dataset.
+
+## Load Libraries
+Load the required libraries and remove everything held in [R's](https://cran.r-project.org/) memory.
+
+```{r Clean Libraries, message=FALSE, warning=FALSE}
+# Remove from memory
+rm(list=ls())
+
+# Load required libraries
+library(adehabitatLT)
+library(lubridate)
+library(move)
+library(proj4)
+library(plyr)
+library(tidyverse)
+```
+
+## Set Time Zone
+I prefer to keep items that require user input to appear at the top of my scripts.  For me, this is helpful when transitioning between different studies because most of this introductory code is essentially the same (especially between manufacturers), except for the time zone and local projection.  In this example, we will update UTC time to local time (Africa/Nairobi). 
+
+```{r Clean Timezone}
+# TimeZone and Projection
+# Other timezones can be found at: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+Timezone1 <- "UTC"
+Timezone2 <- "Africa/Nairobi" 
+UTM36s.proj <- "+proj=utm +zone=36 +south +ellps=WGS84 +datum=WGS84 +units=m +no_defs" # EPSG:32736
+LatLong.proj <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"  # EPSG:4326
+```
+
+## Load Collar Data
+Load the `.csv` downloaded directly from [Movebank](https://www.movebank.org/). These are my dissertation data that will be used for demonstration purposes. Included with this file is a reference file (also downloaded from [Movebank](https://www.movebank.org/)), which contains additional details (sex, age) about each animal.  
+
+Most important is that any movement dataset included in analysis has the following variables:
+
+1) Unique Animal ID
+2) Time stamp
+3) Coordinates (X/Y)
+
+**NOTE**: If you open the file provided in Excel, do **NOT** save the file before loading it in [R](https://cran.r-project.org/). Excel will change the time stamp column and set it to the time on your computer - obviously not what you want for most studies.
+
+```{r Clean Read, message=FALSE, warning=FALSE}
+# Read files in Data directory (Data File and Accessory File) - FILE IS NOT SPATIAL
+wild <- read_csv("./Data/White-bearded wildebeest in Kenya.csv")
+wild.ref <- read_csv("./Data/White-bearded wildebeest in Kenya-reference-data.csv")
+
+# In this case, the column headers have "-" or ":" in them.  These need to be removed:
+names(wild) <- gsub("-", "", names(wild))
+names(wild) <- gsub(":", "", names(wild))
+names(wild.ref) <- gsub("-", "", names(wild.ref))
+
+# NOTE: When printing to screen, it appears that significant digits have been truncated.  This is not the case.  It is just how R prints the data
+# wild
+# wild$locationlong[1]
+
+# Look at the data and examine the data structure
+#head(wild)
+#str(wild)
+
+#head(wild.ref)
+#str(wild.ref)
+
+# If you have multiple files, rather than a single file with all your animals, you can do something similar to:
+# Change the wildcard (pattern) to what makes most sense to your dataset
+#wild.all <- list.files(path='./data', pattern='Kenya.csv', all.files=FALSE, full.names=TRUE)
+
+# Bind files together
+#wild <- lapply(wild.all, FUN=read_csv)
+#wild <- do.call(rbind, wild)
+
+# In most cases, you won't need to do this, but this file need a few things to be fixed
+#names(wild) <- gsub("-", "", names(wild))
+#names(wild) <- gsub(":", "", names(wild))
+
+```
+
+## Dataframe Organization & Cleaning
+Many of the columns included in the dataframes are unnecessary.  We need to clean and filter each dataframe and can do so with tools from the [tidyverse] (https://cran.r-project.org/web/packages/tidyverse/index.html) package.  We will update the timezone to the local time zone and subset the start/end dates for each animal to match with what we recorded in our reference dataset.  These dates represent the dates that the collar was deployed on the animal.  To do so we need to join the two dataframes together using a shared primary key (i.e., id). Lastly, we will check on the completeness of the dataset and filter out erroneus data points.
+
+NOte, date/time fields can often present issues and be difficult to import.  If problems exist, you may need to properly format the date/time fields first.  See the [lubridate](https://cran.r-project.org/web/packages/lubridate/index.html)) package for some instructions and/or the [strptime](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/strptime) package to format your date/time field. Note the format of **YOUR** own dataset (e.g., "%Y-%m-%d %H:%M:%S").
+
+```{r Clean Merge}
+# Clean the reference file, selecting only the columns that you want to include
+# Important is that the file contains the deployment on and off date and times. The dates will allow us to filter/remove datapoints outside of the deployment window
+wild.ref <- 
+  wild.ref %>% 
+  transmute(id = tagid,
+            start = deployondate,
+            end = deployoffdate,
+            sex = animalsex,
+            site = studysite)
+
+# Now do the same for the tracking dataset
+# Rename/Reorganize column headers, keeping only the fields of interest
+# Change timezone to local time
+wild <- 
+  wild %>% 
+  transmute(id = taglocalidentifier,
+            name = individuallocalidentifier,
+            timeUTC = timestamp, # Keep if you want for comparison
+            timeLocal = with_tz(timestamp, tz = Timezone2), # Update timezone. Field must be a date-time object (POSIXct or other)
+            longitude = locationlong,
+            latitude = locationlat,
+            temp = externaltemperature,
+            dop = gpsdop,
+            fixtype = gpsfixtyperaw,
+            height = heightaboveellipsoid) %>% 
+  
+  # Make sure no duplicate id and timestamp exist.
+  distinct(id, timeLocal, .keep_all = TRUE) %>% 
+
+  # Remove any records that don't have a timestamp or a Lat/Long location
+  filter(!is.na(timeLocal),
+         !is.na(latitude)) %>% 
+
+  # Join the Reference dataset to the movement dataset
+  left_join(
+    wild.ref %>% 
+      dplyr::select(id, sex, site, start, end),
+    by = c('id' = 'id')) %>% 
+
+  # Now use the start and end timestamps to filter the dataset
+  # Do this specifically for each individual (group_by)
+  group_by(id) %>% 
+  filter(
+    timeLocal > start & timeLocal < end) %>% 
+  
+  # Remove fields you don't need
+  dplyr::select(-c(start, end)) %>% 
+  
+  # Arrange the dataset by id and timestamp
+  arrange(id, timeLocal)
+  
+```
+
+# Summarize
+Summary the data imported and plot the points to visualize patterns
+
+```{r Summarize, message=FALSE, warning=FALSE}
+# Look at the data and summarize results
+wild %>% 
+    
+  # Check on which animals included and timezone
+  group_by(id) %>% 
+  
+  # Summarize the dataset to highlight the number of records and duration of tracking period
+  summarize(
+    Records = n(),
+    #MinLat = min(latitude), MaxLat = max(latitude), MinLong = min(longitude), MaxLong = max(longitude),
+    StartDate = min(timeLocal),
+    EndDate = max(timeLocal), 
+    TrackPeriod_yrs = round(as.duration(min(timeLocal) %--% max(timeLocal)) / dyears(1), digits=1)) %>% 
+  
+  # Arrange by start date
+  arrange(StartDate, id)
+
+# Create plot
+# Not pretty at this point, but this is just a start
+ggplot(
+  data = wild,
+  mapping = aes(
+    x = longitude,
+    y = latitude,
+    color = as.factor(id))) + 
+  geom_point(shape = ".",
+             size = 3.5,
+             alpha = 0.25)
+```
+
+# Data Quality & Summary
+Nearly all telemetry datasets have some sort of data quality flag included with the recorded positions. Since every manufacturer has different ways to report error, you'll have to familiarize yourself with your own dataset.  For example, some manufacturers report SPS (Standard Positioning System) or DGPS (Differential GPS) positions, while others report a measure of the type of positions (e.g., 1D, 2D, 3D).  Best is when manufacturers report a Dilution of Precision (DOP).  In this last step, we'll assess DOP and then create a 2D trajectory to summarize and graph results.  
+
+## Dilution of Precision (DOP)
+Lotek GPS collars (what we're using here) are provided with a DOP measure.  While the data have already been cleaned prior to import into [Movebank](https://www.movebank.org/), these steps can be adapted to other datasets and are potentially useful to remove poor quality data points.  Colleagues at the Smithsonian (Fleming et al. in review) are also working on methods to fit a model to the error structure of the data and correct for potential problems.  We recommend placing your GPS device in an open constellation before fitting collars on your animals, to providing the validation data required to assess GPS error/scattering.  Here, we'll show a very basic way of filtering poor quality data points.  If fitting a model to the movement data, like those described in the Continuous Time Movement Modeling ([CTMM](https://cran.r-project.org/web/packages/ctmm/index.html)) Framework, this step is not necessary.
+
+```{r Summary Load Data, message=FALSE, warning=FALSE}
+# Plot the DOP values for confirmation.
+# For this dataset, we will examine whether the position is 2D or 3D and then use a qualitative filter to remove poor positions
+# Here, I am being more restrictive on 2D positions (dop < 5.0)
+
+# Example: 
+nrow(wild)
+ggplot(
+  data = wild,
+  aes(x = dop)) +
+  geom_histogram(color = "black", fill = "white") +
+  labs(title="Wildebeest GPS Data", x = "DOP", y = "Frequency") +
+  theme_classic()
+
+# Filter/subset the dataset to remove problem records 
+# This won't do much here because most of these data have already been filtered
+wild <- 
+  wild %>% 
+  filter(
+    fixtype == "3D" & dop < 10.0 | fixtype == "2D" & dop < 5.0)
+
+nrow(wild)
+
+# Could then plot again to show the difference.
+# I'm not doing so here because I have already cleaned the data. included
+
+# ggplot(
+#   data = wild,
+#   aes(x = dop)) +
+#   geom_histogram(color = "black", fill = "white") +
+#   labs(title="Wildebeest GPS Data", x = "DOP", y = "Frequency")
+#   theme_classic()
+```
+
+## Create Trajectory
+Many [R](https://cran.r-project.org/) packages exist to create movement trajectories.  This includes [AdehabitatLT](https://cran.r-project.org/web/packages/adehabitatLT/index.html), [move](https://cran.r-project.org/web/packages/move/index.html), and [amt](https://cran.r-project.org/web/packages/amt/index.html).  Here, we will use [adehabitatLT](https://cran.r-project.org/web/packages/adehabitatLT/index.html) to generate a trajectory and then summarize the movements of each animal, converting the spatial object from Lat/Long to UTM 36S WGS84.  This is essential to calculate distance between steps.  Importantly, we need to "regularize" the trajectory, filling in a NULL record where a point should have been collected but was missed.
+
+```{r Create Trajectory, message=FALSE, warning=FALSE}
+# Create matrix
+temp <-as.matrix(cbind(wild$longitude,wild$latitude))
+
+# Project to UTM 36S (projection specified above) or other meter projection
+xy <- project(temp, UTM36s.proj) # This uses the proj4 package (Spatial Points File)
+
+# Calculate the distance between successive locations, relative and absolute turning angles (in radians), and the time interval between successive locations (in seconds)
+# Error message relates to using a tibble instead of a dataframe
+traj.raw <-as.ltraj(xy, 
+                    date = wild$timeLocal,
+                    id = wild$id, 
+                    typeII = TRUE, 
+                    infolocs = wild[5:8], # columns latitude, longitude, temp, dop
+                    slsp = c("remove"))
+
+# Look at all animals
+plot(traj.raw)
+plot(traj.raw[1]) # Or any other animal
+traj.raw 
+
+# Notice that the dataset has no NAs.  This is because the function doesn't recognize the movement interval, something we must set.
+# In our case, the data were collected: Every hour from 6 am to 6 pm and Every three hours from 6 pm to 6 am
+# For the remainder of our exercises, we will treat these data as a 3 hour dataset
+
+# Create a reference date and use setNA to re-run trajectory
+refda <- strptime("00:00", "%H:%M", tz=Timezone2)
+
+# Create NA values and make a regular trajectory based on refda
+traj.NA <- setNA(traj.raw, refda, 3, units = "hour") 
+
+# Summarize Trajectory
+Summary.traj <- summary(traj.NA)
+
+# Add details to the summary
+Summary.traj <- 
+  Summary.traj %>% 
+  mutate(
+    DaysTrack = signif(difftime(date.end,date.begin, units="days"),digits=2),
+    Records = nb.reloc-NAs,
+    PctComplete = signif((nb.reloc-NAs)/nb.reloc*100,digits=4),
+)
+
+# Look at
+Summary.traj
+
+# Convert trajectory with movement statistics to a dataframe
+wild.df <-ld(traj.NA)
+
+# Calculate basic movement statistics.  This are just some initial statistics
+# REMEMBER: this is a 3 hour data.  Therefore, movements are simply based on the linear steps.
+Mvmt.Statistics <- ddply(wild.df,"id", summarise,
+              AvgMove = round(mean(dist/1000,na.rm=TRUE),digits=2), # Convert to km
+              SumMove = round(sum(dist/1000,na.rm=TRUE),digits=2), # Convert to km
+              MaxDisp=round(max(sqrt(R2n)/1000,na.rm=TRUE),digits=2)) # Convert to km
+Mvmt.Statistics
+```
+
+## Visualize Movement Patterns
+[Adehabitat]() has a number of plotting options.  I use these sometimes, but usually prefer to create my own plots from the variables created using the [Adehabitat]() functions.  Here, I provide a simple example of a movement trajectory, with a "for loop" to plot each animal.  I find the net squared displacement plots and steplengths to be interesting to look at, helping to identifying potential outliers and/or errors in the data.  These plots can also be helpful in informing potential research questions.
+
+```{r Visualize}
+# Plot trajectory using adehabitat object (list)
+plot(traj.NA[1])
+
+# We can also look at the DOP over time or the how the data were collected (every X minutes)
+plotltr(traj.NA[1], "dop") # Graphic of DOP over time......these should all be < 10, since we've cleaned them above
+#plotltr(traj.NA[1],"dt/60") 
+
+# My preference is to create a custom plot
+# Setup a plotting layout with three panels
+layout(matrix(c(1,1,2,3), 2, 2, byrow = FALSE), widths=1, heights=c(1,1))
+
+# Here, we will "loop" over every individuals (by id)
+Id.val <- unique(wild.df$id)
+
+#for (i in 1:length(Id.val)){  # Uncomment out
+i <- 1 ###### Remove to loop over all animals
+# ****************************** 
+
+  # Remove the NAs and subset to id == Id.val[i]
+  wild.sub <- subset(wild.df[!is.na(wild.df$x),], id == Id.val[i]) # This is just to account for NAs that have been added from as.ltraj function
+  
+  # Calculate the total days tracked
+  time.diff <- trunc(difftime(format(wild.sub$date[1],tz=Timezone2),format(wild.sub$date[nrow(wild.sub)],tz=Timezone2),units="days"))
+  
+  # Plot the trajectory
+  plot(wild.sub$x,wild.sub$y,typ="l",xlab="Easting",ylab="Northing",main=paste0(wild.sub$id[1]," Movement"),frame=FALSE,axes=FALSE,asp=1)
+     mtext(paste0(format(wild.sub$date[1],"%Y-%m-%d")," to ",format(wild.sub$date[nrow(wild.sub)],"%Y-%m-%d")),cex=0.75)
+     axis(1, labels=TRUE)
+     axis(2, labels=TRUE)
+  points(wild.sub$x,wild.sub$y,pch=16,cex=0.5,col="blue")
+  points(wild.sub$x[1],wild.sub$y[1],pch=17,cex=1,col="green")
+  points(wild.sub$x[nrow(wild.sub)],wild.sub$y[nrow(wild.sub)],pch=15,cex=1,col="red")
+  
+  # Plot the movements over time (Velocity)
+  plot(wild.sub$date, wild.sub$dist/1000, type='l', ylab="Distance moved (km)", xlab="Time", main="Steplengths", frame=FALSE)
+    # Calculate the time from release date	
+    mtext(paste0(abs(time.diff)," days"),cex=0.75)
+  
+  # Plot the net displacement per step
+  plot(wild.sub$date, sqrt(wild.sub$R2n)/1000, type='l', ylab="Distance (km)", xlab="Days Since Release", main="Net Displacement",frame=FALSE)
+    mtext(paste0(abs(time.diff)," days"),cex=0.75)
+#} # Uncomment
+```
+
+# Subset & Export
+For the next exercise, we will incorporate a subset of the dataset we cleaned above (the non-trajectory dataset).  This has a Lat/Long coordinates reference system.  We will subset the data to the Maasai Mara and save as a `.Rdata` file.
+
+```{r Clean Export}
+# Filter the data for analysis
+wild.Mara <- 
+  wild %>% 
+  filter(
+    site == "Mara")
+
+wild.Athi <- 
+  wild %>% 
+  filter(
+    site == "Athi-Kaputiei Plains")
+
+wild.Ambo <- 
+  wild %>% 
+  filter(
+    site == "Amboseli Basin")
+
+# How many animals are included in the dataframe?  Should be 15, 12, and 9.
+length(unique(wild.Mara$id))
+length(unique(wild.Athi$id))
+length(unique(wild.Ambo$id))
+
+# Save file to your Data directory for subsequent analyses
+save(wild.Mara, wild.Athi, wild.Ambo, file = "./Data/wild.Rdata")
+```
