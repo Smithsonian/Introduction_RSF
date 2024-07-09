@@ -99,13 +99,13 @@ plot(rsf.stack)
 # woody_dist -Woody Distance, the distance to woody vegetation (based on VCF) (expected negative response - predation risk)
 
 # The fence plot is hard to interpret because there are so many low values in the center of the plot. This means there are a lot of fences there. Let's color the distance values and only show the first 100 to better see where the fences are located.
-plot(rsf.stack$fence_dist)
-terra::plot(rsf.stack$fence_dist,
+# plot(rsf.stack$fence_dist)
+plot(rsf.stack$fence_dist,
             range = c(0, 100),
             col = "black")
 
 # We can review the range of values in each raster like this.
-summary(values(rsf.stack$fence_dist))
+# summary(values(rsf.stack$fence_dist))
 
 # What is the crs of the raster stack?
 crs(rsf.stack, proj=TRUE)
@@ -144,7 +144,7 @@ WB.data.sf <- WB.data %>%
 #AEA.Africa.proj <- "+proj=aea +lat_1=20 +lat_2=-23 +lat_0=0 +lon_0=25 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
 
 # Now what's the CRS?
-st_crs(WB.data.sf)
+# st_crs(WB.data.sf)
 
 # Let's plot to make sure everything is aligned.
 # Here I'm choosing to plot with a sequential palette with 10 colors on the ramp. You can run tmaptools::palette_explorer() to explore the palette options. 
@@ -229,17 +229,15 @@ nt.trk.rs <- track_resample(nt.trk,
 ## Defining Availability
 Perhaps the most important aspect of any habitat selection analysis is the assessment of availability.  In a RSF, the assumption is that the distribution of available habitat is constant through time and that the animal has equal access to **ALL** areas within a user-defined area (Type III Habitat Selection).  This assumption may hold true when positions are observed infrequently (the case more commonly when data were collected infrequently from VHF studies), but less so with many modern telemetry studies.
 
-The goal here, however, is to contrast points where an animal was observed with locations that were potentially available.  To do so, we will create pseudo absence points generated throughout an animals' MCP home range.  The [amt](https://cran.r-project.org/web/packages/amt/index.html) function `random_points` is a convenient way to do this.
+The goal is to contrast points where an animal was observed with locations that were potentially available.  To do so, we will create pseudo-absence points generated throughout an animals' home range.  The [amt](https://cran.r-project.org/web/packages/amt/index.html) function `random_points` is a convenient way to do this, with various options for generating the area in which sample.
 
 ```{r Availability, message=FALSE, warning=FALSE, echo=TRUE}
-# Here we are generating 10 times the number of "Use" points to get our list of "available" points. We'll start with this level to begin to inspect our data and look for initial patterns. Before running our final models we'll assess what a robust minimum # of available points should be.
-nt.rsf.10 <- random_points(nt.trk.rs,
-                      n = nrow(nt.trk.rs) * 10,
-                      type ="regular") # Also could be "random"
-
-# Where are these points located? 
-# Within the 100% MCP home range.  That's the only option currently in the package.
-# To generate points within a user defined polygon, we'd need to use st_sample().
+# Here we will generate 10 times the number of "Use" points to get our list of "available" points. We'll start with this level to begin to inspect our data and look for initial patterns. Before running our final models we'll assess what a robust minimum # of available points should be.
+hr <- hr_mcp(nt.trk.rs, levels = 1) # We first create a home range based on the Use data.  Multiple options exists to do so in amt, included hr_akde).  Levels indicates the isopleth (Here: 100%)
+nt.rsf.10 <- random_points(hr,
+                           n = nrow(nt.trk.rs) * 10,
+                           type ="regular",  # Could also be "random"
+                           presence = nt.trk.rs) 
 
 # What does our dataset look like now?
 head(nt.rsf.10)
@@ -252,20 +250,20 @@ table(nt.rsf.10$case_)
 # Plot Use/Availability
 plot(nt.rsf.10) 
 
-# Assign weights to our available available points, making extremely high.
-nt.rsf.10 <- nt.rsf.10 %>% 
-  mutate(w = ifelse(case_ == T, 
-                    1, 
-                    5000)) 
+# Assign weights to our available available points, making extremely high.  Potentially remove
+# nt.rsf.10 <- nt.rsf.10 %>% 
+#   mutate(w = ifelse(case_ == T, 
+#                     1, 
+#                     5000)) 
 ```
 
 ## Extract Covariates
-# Here we extract the value of each raster file for each tracking location and each random location. This is something you can do individually with spatial files using various commands either in sf or terra depending on the type of file. For rasters it is the terra::extract() function. This can be done with one line of code when we have our rasters in a stack. The extract_covariates() function in amt calls this terra::extract function.
+
+Here we will extract the value of each raster file for each 'Use' and 'Available' location. We will use the function `extract_covariates()` which is a wrapper for the `extract` function in the `terra` package.  This can be done with one line of code when we have our rasters in a stack. The extract_covariates() function in amt calls this terra::extract function.
 
 ```{r Extract, message=FALSE, warning=FALSE, echo=TRUE}
-# Extract all the raster variables at all Use/Available points.
-# Nice that this is done all with a single command....and very quickly.  Amazing!
-# NOTE: we are not considering time here - see extract_covariates_var_time() function to do so, a bit more complicated
+# Extract all the raster variables at Use/Available points.
+# NOTE: Time is not considered.
 nt.rsf.10 <- nt.rsf.10 %>% 
   extract_covariates(rsf.stack)
 
