@@ -258,8 +258,7 @@ plot(nt.rsf.10)
 ```
 
 ## Extract Covariates
-
-Here we will extract the value of each raster file for each 'Use' and 'Available' location. We will use the function `extract_covariates()` which is a wrapper for the `extract` function in the `terra` package.  This can be done with one line of code when we have our rasters in a stack. The extract_covariates() function in amt calls this terra::extract function.
+Now that our 'Use'/'Availability' dataset has been constructed, we will extract the value of each raster at these points.   We will use the function `extract_covariates()` which is simply a wrapper function in [amt](https://cran.r-project.org/web/packages/amt/index.html) that uses the `terra::extract()` function you are familiar with.
 
 ```{r Extract, message=FALSE, warning=FALSE, echo=TRUE}
 # Extract all the raster variables at Use/Available points.
@@ -271,27 +270,35 @@ nt.rsf.10 <- nt.rsf.10 %>%
 head(nt.rsf.10)
 #names(nt.rsf.10)
 
-# Now let's summarize some of these results
-# Now we should get some general sense of how values compare between the use and available locations.
-# One way to visualize this is to look at the frequency distributions of each covariate, compared between use and available locations. This is the equivalent of a histogram, but with lines. Here is an example for one covariate, and this indicates more higher values of anthropogenic risk for the false/available values.
-
-ntishya_rsf_10 %>% 
+# Now let's summarize these results to get a sense of how the values compare between 'use' and 'available' locations
+# Graph frequency distribution of each covariate.
+nt.rsf.10 %>% 
   ggplot(aes(x = anth_risk,
              after_stat(density),
              col = case_)) + 
-  geom_freqpoly(size = .7) 
+  geom_freqpoly(size = .7,
+                bins = 30) 
 
-# You may have many covariates, so doing this in a loop makes sense. First I'm making a vector of my variable names.
-
-vars <- ntishya_rsf_10 %>% 
+# You may have many covariates, so doing this in a loop makes sense. First I'll making a vector of my variable names.
+vars <- nt.rsf.10 %>% 
   select(anth_risk:woody_dist) %>% 
   names()
 
-# Then I'm creating a list of plots using the purrr::map() function. 
+# Then, we can either use a for loop
+# for(i in 1:length(vars)){
+#   nt.rsf.10 %>%
+#     select(case_,
+#            var = vars[i]) %>%
+#     ggplot(aes(x = var,
+#                after_stat(density),
+#                col = case_)) +
+#     geom_freqpoly(size = .7,
+#                   bins = 30) +
+#     labs(title = vars[i])
+#   }
 
-hist_plots <- map(vars, ~
-                    
-                    ntishya_rsf_10 %>% 
+# Or the map function to create a list of plots 
+hist.plots <- map(vars, ~ nt.rsf.10 %>% 
                     select(case_, var = .x) %>% 
                     ggplot(aes(x = var,
                                after_stat(density),
@@ -300,24 +307,19 @@ hist_plots <- map(vars, ~
                                   bins = 30) + 
                     labs(title = .x))
 
-# Then I put all the plots in one grid. You'll need to expand this plot to view all the patterns clearly.
+# Then put all the plots in one grid
+cowplot::plot_grid(plotlist = hist.plots)
 
-cowplot::plot_grid(plotlist = hist_plots)
-
-# We may also want to use boxplots for this. 
-
-box_plots <- map(vars, ~
-                   
-                   ntishya_rsf_10 %>% 
+# Do the same using a boxplot
+box.plots <- map(vars, ~
+                   nt.rsf.10 %>% 
                    select(case_, var = .x) %>% 
                    ggplot(aes(y = var,
                               col = case_)) + 
                    geom_boxplot() + 
                    labs(title = .x))
 
-cowplot::plot_grid(plotlist = box_plots)
-
-# Of course we could spend more time making these plots look nicer, but they are meant to give us some general sense of patterns, and potential problems, in the data. Other patterns for example are that use locations tend to be closer to major roads...remember this is all based on one individual at this point.
+cowplot::plot_grid(plotlist = box.plots)
 ```
 
 ### Assess Collinearity
@@ -369,7 +371,7 @@ The process simply entails "looping" over a differ set of availability (from 1 "
 n.frac <- c(1, 5, 20, 50, 100) 
 
 # Total available locations to be generated, based on the number of Use points
-n.pts <- nrow(wb) * n.frac
+n.pts <- nrow(nt.trk.rs) * n.frac
 
 # Number of replicates of each available location (1,5,20,50,100)
 # This is number of times each model will be fit, allows to calculate variability
@@ -382,14 +384,12 @@ n.rep <- 20
 # Fit glm model for each available location (1,5,20,50,100) and for each replication (re-sampling)
 
 # Commenting out because the process is time consuming
-# *******************************************
-# *******************************************
 # wb.sim <- tibble(
-#   n.pts = rep(n.pts, n.rep), 
-#   frac = rep(n.frac, n.rep), 
+#   n.pts = rep(n.pts, n.rep),
+#   frac = rep(n.frac, n.rep),
 #   result = map(
 #     n.pts, ~
-#       wb %>% random_points(n = .x) %>%
+#       nt.trk.rs %>% random_points(n = .x) %>%
 #       extract_covariates(rsf.stack) %>%
 #       mutate(anth_risk= scale(anth_risk),
 #              woody_dist = scale(woody_dist),
@@ -400,7 +400,14 @@ n.rep <- 20
 #              waterpts_dist = scale(waterpts_dist)) %>%
 #       glm(case_ ~ anth_risk + woody_dist + fence_dist + prirds_dist + river_dist + secrds_dist + waterpts_dist,
 #           data = ., family = binomial(link = "logit")) %>%
-#       tidy()))
+#       broom::tidy()))
+
+# Save file
+# write_rds(wb.sim, 
+#           file = "Data/nt.sim.rds")
+
+# Read in the file
+wb.sim <- read_rds("Data/nt.sim.rds")
 
 wb.sim # We see the structure has 100 rows (n.frac (5) x n.rep (20) = 100) # File loaded at the beginning of script
 #str(wb.sim)
@@ -408,7 +415,8 @@ wb.sim$result[[1]]
 
 # We now "unnest" the results to plot the coefficient estimates from individual model fits with different sets of available data (1,5,20,100) 
 wb.sim %>% unnest(cols = result) %>% 
-  mutate(wb.sim = recode(term, "(Intercept)"="Intercept",
+  mutate(term = recode(term, 
+                         "(Intercept)"="Intercept",
                          anth_risk = "Anthropogenic disturbance", 
                          woody_dist = "Woody Distance",
                          fence_dist = "Fence Distance", 
@@ -416,10 +424,12 @@ wb.sim %>% unnest(cols = result) %>%
                          river_dist = "River Distance",
                          secrds_dist = "Sec Rds Distance",
                          waterpts_dist = "Water Point Distance")) %>% 
-  ggplot(aes(factor(frac), y = estimate)) +
-  geom_boxplot() + facet_wrap(~ wb.sim, scale  ="free") +
+  ggplot(aes(factor(frac), 
+             y = estimate)) +
+  geom_boxplot() + 
+  facet_wrap(~ term, scale  ="free") +
   geom_jitter(alpha = 0.2) + 
-  labs(x = "Number of available points (multiplier of no. of used locations)", 
+  labs(x = "Available points per Use locations)", 
        y = "Estimate") +
   theme_light()
 ```
