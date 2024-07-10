@@ -249,12 +249,6 @@ table(nt.rsf.10$case_)
 
 # Plot Use/Availability
 plot(nt.rsf.10) 
-
-# Assign weights to our available available points, making extremely high.  Potentially remove
-# nt.rsf.10 <- nt.rsf.10 %>% 
-#   mutate(w = ifelse(case_ == T, 
-#                     1, 
-#                     5000)) 
 ```
 
 ## Extract Covariates
@@ -271,46 +265,18 @@ head(nt.rsf.10)
 #names(nt.rsf.10)
 
 # Now let's summarize these results to get a sense of how the values compare between 'use' and 'available' locations
-# Graph frequency distribution of each covariate.
 nt.rsf.10 %>% 
-  ggplot(aes(x = anth_risk,
-             after_stat(density),
+  ggplot(aes(y = anth_risk,
              col = case_)) + 
-  geom_freqpoly(size = .7,
-                bins = 30) 
+  geom_boxplot() +
+  labs(title = "Anthropogenic Risk")
 
-# You may have many covariates, so doing this in a loop makes sense. First I'll making a vector of my variable names.
+# You may have many covariates, so doing this in a loop makes sense. Instead using a 'for' loop, we'll use the 'map' function.  See 'help(map)'.  First we need to make a vector of variable names that we want to plot.
 vars <- nt.rsf.10 %>% 
   select(anth_risk:woody_dist) %>% 
   names()
 
-# Then, we can either use a for loop
-# for(i in 1:length(vars)){
-#   nt.rsf.10 %>%
-#     select(case_,
-#            var = vars[i]) %>%
-#     ggplot(aes(x = var,
-#                after_stat(density),
-#                col = case_)) +
-#     geom_freqpoly(size = .7,
-#                   bins = 30) +
-#     labs(title = vars[i])
-#   }
-
-# Or the map function to create a list of plots 
-hist.plots <- map(vars, ~ nt.rsf.10 %>% 
-                    select(case_, var = .x) %>% 
-                    ggplot(aes(x = var,
-                               after_stat(density),
-                               col = case_)) + 
-                    geom_freqpoly(size = .7,
-                                  bins = 30) + 
-                    labs(title = .x))
-
-# Then put all the plots in one grid
-cowplot::plot_grid(plotlist = hist.plots)
-
-# Do the same using a boxplot
+# The, we simply use 'map' to create a plot for each var.  the '.x' is like our i in our 'for' loop.
 box.plots <- map(vars, ~
                    nt.rsf.10 %>% 
                    select(case_, var = .x) %>% 
@@ -319,143 +285,179 @@ box.plots <- map(vars, ~
                    geom_boxplot() + 
                    labs(title = .x))
 
+# We can put them all together using the cowplot
 cowplot::plot_grid(plotlist = box.plots)
 ```
 
-### Assess Collinearity
-Similar to analyses with Addax, we need to assess if potential collinearity issues exist between variables.
+## Assess Collinearity
+collinear predictor (indepedent) variables can influence the variance estimates of the model and make it difficult to interpret model coefficients.  This isn't a problem if prediction is your goal.  However, in our case, we are interested in understanding the influence of these predictors on our response variable (i.e., where our animals are located in space and time).  As a result, we need to avoid multi-collinearity. 
 
-**Question:** What to do if no collinearity issues exist, but there is a high level of correlation between certain variables?
+We can get a general sense of pairwise problems between predictor variables by looking at correlation values.  As a general rule of thumb, values > 0.7 are recognized as being problematic. We can also check the Variance Inflation Factor (VIF) which assess multi-collinearity across ALL predictors, with higher values indicating high collinearity of a predictor with the rest of the set.  Some sources indicate a VIF over 10 is problematic, while others set the threshold at 3.0. 
 
-```{r Collinearity}
+```{r Collinearity, message=FALSE, warning=FALSE, echo=TRUE}
 # Assess collinearity
-test.corr <- as.data.frame(wb_RSF)
-vifstep(test.corr[,4:10]) # VIF indicates no collinearity problem, but there is a high level of correlation (max: 0.84)
-cor(test.corr[,4:10])
+cor(nt.rsf.10[,4:10])
 
-# How to address?  Should they be removed or are we less concerned?
-# Let's fit different models and see how the standard error of our included variables changes between fitted models
-# Notice I have scaled the variables
-MA <- glm(case_ ~ scale(anth_risk) + scale(fence_dist) + scale(waterpts_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), family = binomial(link="logit"), 
-     data =wb_RSF)
-summary(MA)
+# Table of correlation values indicates that high levels of correlation between fence distance and waterpoint distance (0.87).  We should remove one of these variables based on our research objectives.  Here, I'd keep fence distance because I am more interested in this question from a management standpoint.  Some other correlations are observed between woody distance and waterpoints and woody distance and primary roads.
 
-# Remove waterpts_dist
-MB <- glm(case_ ~ scale(anth_risk) + scale(fence_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), family = binomial(link="logit"), 
-     data =wb_RSF)
-summary(MB)
+# Before making any decisions, let's also check the Variance inflation Factor. 
+vif(as.data.frame(nt.rsf.10[,4:10]))
 
-# Remove fence_dist
-MC <- glm(case_ ~ scale(anth_risk) + scale(waterpts_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), family = binomial(link="logit"), 
-     data =wb_RSF)
-summary(MC)
+# Let's remove waterpoints and see if doing so is helpful
+vif(as.data.frame(nt.rsf.10[,c(4:8,10)]))
 
-# Look at coefficients
-tab_model(MA,MB,MC, show.se=T, transform=NULL)
-
-# Out of curiosity, how to models compare 
-AIC(MA,MB,MC)
+# This helps a alot, but woody distance is still quite high (VIF  = 4.1).  We could make a decision to remove entirely or if we think it could be an important factor to include (e.g., woody vegetation is likely avoided by wildebeest because of increased risk of predation), we could include but make sure woody vegetation not included in the same model with fences and primary roads.  We could then evaluate each model separately using AIC.  For now, we'll proceed.
 ```
 
-### How Many Points is Enough?
-Before we move on to final model fitting, we must first the address the question of whether or not we have adequately sampled "Availability".  Ultimately, this is a trade-off between statistical robustness and computer processing time.  I generally perform this on a single individual as evidence that I am appropriately sampling from availability.
+## Sensitivity Analyses - How many Locations are Enough?
+Before we move on to final model fitting, we must first address whether we have adequately sampled 'Availability'.  Ultimately, there is a trade-off between statistical robustness and computer processing time.  I generally perform this on a single individual as evidence that I am appropriately sampling from availability.  
 
-The process simply entails "looping" over a differ set of availability (from 1 "Available" point per "Use" point to 100 "Available" points per "Use" point).  We will use a nested structure, rather than the "for loop" structure, that we have demonstrated in previous exercises.  For this complicated process, I think the nested structure is a bit easier.  We then do this process multiple times, so that the "Available" points differ and so we can evaluate how much the coefficients change between model fittings.
+Our goal is to determine the optimal sample of availability necessary to achieve stable coefficient estimates.  To do so, we must "loop" over different sets of availability, from 1 'Availability' point per 'Use' point to 100 'Availability' points per 'Use' point.  We will use a nested structure, rather than the "for loop" structure, that we have demonstrated in previous exercises.  For this somewhat complicated process, I think the nested structure is a bit easier.  We then do this process multiple times, so that the 'Available' points differ and so we can evaluate how much the coefficients change between repetitive model fittings.
 
-**NOTE: THIS CAN TAKE A LONG TIME BECAUSE YOU ARE FITTING MULTIPLE DIFFERENT MODELS WITH MANY DATA POINTS**
-
-```{r Sensitivity}
-# Exploring sensitivity of RSF coefficients to the number of available points
-
-# Setup number of available locations to sample
+```{r Sensitivity, message=FALSE, warning=FALSE, echo=TRUE}
+# Setup number of available locations to sample during each model fitting
 n.frac <- c(1, 5, 20, 50, 100) 
 
 # Total available locations to be generated, based on the number of Use points
 n.pts <- nrow(nt.trk.rs) * n.frac
 
-# Number of replicates of each available location (1,5,20,50,100)
-# This is number of times each model will be fit, allows to calculate variability
-# For a publication, I would increase the n.rep to 100
+# Number of repetitions.  This is simulation so that we can evaluate the variability that exists in the coefficients
+# For a publication, I would increase the n.rep to 100.  Here, 20 is fine.
 n.rep <- 20
 
-# Create a table which can hold the n.reps
-# Extract covariates from rsf.stack
-# Rename the variables
-# Fit glm model for each available location (1,5,20,50,100) and for each replication (re-sampling)
+# Create a table which saves the settings of each scenario
+# We then extract the covariates during each repetition from rsf.stack during each run (the points will vary)
+# Then, fit a glm model for each available location (1,5,20,50,100) and for each replication (re-sampling)
 
-# Commenting out because the process is time consuming
+# Run simulation and store results
+# Commented out as the process is time consuming
+# **********************************************
 # wb.sim <- tibble(
-#   n.pts = rep(n.pts, n.rep),
-#   frac = rep(n.frac, n.rep),
-#   result = map(
+#  n.pts = rep(n.pts, n.rep),
+#  frac = rep(n.frac, n.rep),
+#  result = map(
 #     n.pts, ~
 #       nt.trk.rs %>% random_points(n = .x) %>%
 #       extract_covariates(rsf.stack) %>%
-#       mutate(anth_risk= scale(anth_risk),
+#       mutate(anth_risk = scale(anth_risk),
 #              woody_dist = scale(woody_dist),
 #              fence_dist = scale(fence_dist),
 #              prirds_dist = scale(prirds_dist),
 #              river_dist = scale(river_dist),
 #              secrds_dist = scale(secrds_dist),
 #              waterpts_dist = scale(waterpts_dist)) %>%
-#       glm(case_ ~ anth_risk + woody_dist + fence_dist + prirds_dist + river_dist + secrds_dist + waterpts_dist,
+#       # Fit basic model
+#       glm(case_ ~ anth_risk +
+#             woody_dist +
+#             fence_dist +
+#             prirds_dist +
+#             river_dist +
+#             secrds_dist +
+#             waterpts_dist,
 #           data = ., family = binomial(link = "logit")) %>%
 #       broom::tidy()))
 
-# Save file
-# write_rds(wb.sim, 
-#           file = "Data/nt.sim.rds")
+# Save file so don't need to run everytime
+# write_rds(wb.sim, file = "Data/nt.sim.rds")
 
-# Read in the file
+# Read in the result
 wb.sim <- read_rds("Data/nt.sim.rds")
 
-wb.sim # We see the structure has 100 rows (n.frac (5) x n.rep (20) = 100) # File loaded at the beginning of script
-#str(wb.sim)
+# Look at the summary table of results
+# This shows that we have 100 rows, summarizing the number of points (n.pts) and the availability fraction (frac)
+# We have 100 rows because we have 5 different fractions (n.rep = 5 -> 1,5,20,50,100) and we ran the simulations (n.rep = 20) times.  5 x 20 = 100 rows of results
+wb.sim 
+# Look at the first simulation result
 wb.sim$result[[1]]
 
-# We now "unnest" the results to plot the coefficient estimates from individual model fits with different sets of available data (1,5,20,100) 
+# Visualize/Graph findings
+# We must 'unnest' the contents in each nested dataframe so visualize the coefficient estimates from individual model fits
 wb.sim %>% unnest(cols = result) %>% 
   mutate(term = recode(term, 
-                         "(Intercept)"="Intercept",
-                         anth_risk = "Anthropogenic disturbance", 
-                         woody_dist = "Woody Distance",
-                         fence_dist = "Fence Distance", 
-                         prirds_dist = "Pri Rds Distance",
-                         river_dist = "River Distance",
-                         secrds_dist = "Sec Rds Distance",
-                         waterpts_dist = "Water Point Distance")) %>% 
+                       "(Intercept)" = "Intercept",
+                       anth_risk = "Anthropogenic disturbance", 
+                       woody_dist = "Woody Distance",
+                       fence_dist = "Fence Distance", 
+                       prirds_dist = "Pri Rds Distance",
+                       river_dist = "River Distance",
+                       secrds_dist = "Sec Rds Distance",
+                       waterpts_dist = "Water Point Distance")) %>% 
   ggplot(aes(factor(frac), 
              y = estimate)) +
   geom_boxplot() + 
   facet_wrap(~ term, scale  ="free") +
   geom_jitter(alpha = 0.2) + 
-  labs(x = "Available points per Use locations)", 
+  labs(x = "Available Points per Use Location", 
        y = "Estimate") +
   theme_light()
+
+# This is a key tool in making a final assessment of the minimum # of available points needed for each use location. We can see little change in the coefficient values once we have 20 points per use location, but we'll go with 50 to be safe.
 ```
 
-### Model Fitting
-Based on the model fitting simulations, we will generate 50 available locations per use location.  More would be better, but there is seemingly little change between model fits.  We will follow the same process described above.
+## Model Fitting
+Based on the model fitting simulations, we will generate 50 available locations per use location.  More would be better, but there is seemingly little change between model fits as we increase the number of availability locations beyond this threshold.
 
 Here the intercept decreases as the number of available points increases, but the slope parameter estimates, on average, do not change much once we included at least 20 available points per used point.  We conclude, at least in this particular case, 20 available points per used point is sufficient for interpreting the slope coefficients.  We will follow the same process described above to generate random points, variable extraction, and model fitting.  We then plot the parameter responses.
 
-```{r RSF 50}
+```{r Model Fitting, message=FALSE, warning=FALSE, echo=TRUE}
 # Generating 50 available locations per each used location within animal homerange
-wb_RSF50 <- random_points(wb,n=nrow(wb)*50,typ="random")
+nt.rsf.50 <- random_points(hr,
+                           n = nrow(nt.trk.rs) * 50,
+                           type ="regular",  
+                           presence = nt.trk.rs) 
 
 # Extracting the covariates
-wb_RSF50 <- wb_RSF50 %>% extract_covariates(rsf.stack)
+nt.rsf.50 <- nt.rsf.50 %>% extract_covariates(rsf.stack)
 
-# Fitting model
-M2 <- glm(case_ ~ scale(anth_risk) + scale(fence_dist) + scale(waterpts_dist) + scale(prirds_dist) + scale(river_dist) + scale(secrds_dist) + scale(woody_dist), 
-         family = binomial(link="logit"), 
-         data =wb_RSF50)
-# Get Summary & confidence intervals
-summary(M2)
-confint(M2)
+# Fit a "full" model after removing waterpoints because of high collinearity. We also should avoid running fence distance or primary roads with woody distance, because they are highly correlated. As a result, let's fit three "full" models and then compare them.
+
+# Fitting Model 1 - No woody distance
+M1.NoWood <- glm(case_ ~ scale(anth_risk) + 
+                   scale(fence_dist) + 
+                   scale(prirds_dist) + 
+                   scale(secrds_dist) + 
+                   scale(river_dist), 
+                 family = binomial(link="logit"), 
+                 data = nt.rsf.50)
+
+# Get Summary & calculate profile confidence intervals to see if coefficients overlap zero
+summary(M1.NoWood)
+# broom::tidy(M2.Wood) # Could also use the tidy summary, which is a little easier to read
+confint(M1.NoWood)
+
+# Fitting Model 2 - No Fencing or Primary Roads
+M2.Wood <- glm(case_ ~ scale(anth_risk) + 
+                 scale(secrds_dist) + 
+                 scale(river_dist) +
+                 scale(woody_dist), 
+               family = binomial(link="logit"), 
+               data = nt.rsf.50)
+
+# Get Summary & calculate profile confidence intervals to see if coefficients overlap zero
+summary(M2.Wood)
+confint(M2.Wood)
+
+# Compare models with AIC
+AIC(M1.NoWood, M2.Wood)
+
+# This shows evidence that the first model (M1.NoWood) is quite a bit better.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Plot coefficients (an easy alternative to coefplot - THANKS Pawel!!)
-plot_model(M2,transform = NULL) 
+plot_model(M2, transform = NULL) 
 
 # There are multiple ways to graph the response curves.  In addition to visreg, we could also plot using jtools or sjplot (many others)
 visreg(M2,"anth_risk",
@@ -487,7 +489,7 @@ par(mfrow=c(1,1))
 ```
 
 ### Generate Model Prediction
-Last step is to generate a predictive surface of habitat suitability.  First step is to extract the coefficients of each predictor included in the model summary.  We can't use `Predict` in this case, because we want to ignore the intercept.  Remeber that we **must** scale the reaster values when making the prediction, since our coefficient estimates are based on scaled variables.
+Last step is to generate a predictive surface of habitat suitability.  First step is to extract the coefficients of each predictor included in the model summary.  We can't use `Predict` in this case, because we want to ignore the intercept.  Remember that we **must** scale the raster values when making the prediction, since our coefficient estimates are based on scaled variables.
 
 ```{r Prediction}
 # Extract the coefficient of each predictor from the model summary
