@@ -1,0 +1,264 @@
+---
+title: "Integrated Resource Selection Functions in CTMM"
+author: "Jared Stabach, Smithsonian National Zoo & Conservation Biology Institute"
+date: '`r format(Sys.time(), "%d %B %Y")`'
+output:
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float: 
+      collapsed: true
+      smooth_scroll: true
+    number_sections: false
+    #theme: united
+    #highlight: tango
+pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<a href="https://github.com/Smithsonian/Wildebeest_RSF.git" class="github-corner" aria-label="View source on GitHub"><svg width="80" height="80" viewBox="0 0 250 250" style="fill:#151513; color:#fff; position: absolute; top: 0; border: 0; right: 0;" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a><style>.github-corner:hover .octo-arm{animation:octocat-wave 560ms ease-in-out}@keyframes octocat-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-25deg)}40%,80%{transform:rotate(10deg)}}@media (max-width:500px){.github-corner:hover .octo-arm{animation:none}.github-corner .octo-arm{animation:octocat-wave 560ms ease-in-out}}</style>
+
+# Introduction
+  >Many thanks to Christen Fleming & Björn Reineking for sharing this code
+  
+Following [Alston](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.14025), we will model the relative density of animals (also called the range distribution or utilisation (UD) distribution) as a function of environmental predictors.  As a first start, we will model the UD for a single individual, continuing with our use of the wildebeest data.    
+  
+The publication supporting this analysis can be referenced as:
+
+Alston, JM, Fleming CH, Kays R, Streicher JP, Downs CT, Ramesh T, Reineking B, Calabrese JM. 2022. Mitigating pseudoreplication and bias in resource selection functions with autocorrelation-informed weighting. [doi:10.1111/2041-210X.14025](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.14025)
+
+![](Occurrence.png)
+# Data Prepation
+
+## Load Libraries
+Load the required libraries and remove everything held in [R's](https://cran.r-project.org/) memory.
+
+```{r Clean Libraries, message=FALSE, warning=FALSE, echo = TRUE}
+# Remove from memory
+rm(list=ls())
+
+# You may need to install these packages first
+#install.packages('ctmm', 'terra', 'tidyverse', 'stars', `move2`)
+
+# Load required libraries
+library(ctmm)
+library(terra)
+library(tidyverse)
+library(stars)
+library(move2)
+```
+
+## Load Data
+Let's import our GPS movement dataset and our environmental data layers.  These environmental layers will be used as predictors of habitat suitability.  Since we are fitting a continuous-time movement model to the data, there is no requirement to regularize the trajectory.  As a result, we will import our unregularized trajectory of wildebeest movement.  The raster layers are projected to Albers Equal Area.    
+
+**NOTE: The raster stack was created with the 'terra' package.  The file type is `SpatRaster()`.  [CTMM](https://cran.rstudio.com/web/packages/ctmm/index.html) does support (at least not currently) the 'terra' package.  We can easily resolve this by importing the file using the `raster()` function from the 'raster' package.  Note, however, that this package will be deprecated in the next few months.  
+
+```{r Load, message=FALSE, warning=FALSE, echo=TRUE}
+# Load all raster layers for Athi-Kaputiei Plains study area.
+# Upload the raster stack with terra.  
+rsf.stack <- rast("Data/ak_raster_stack.tif") 
+# SpatRaster's are not currently supported.  Convert to format recognized by CTMM.  
+rsf.stack <- as(rsf.stack, "Raster")
+
+# Make sure files load and where we think they should be
+plot(rsf.stack)
+
+# What is the crs and resolution of the raster stack?
+crs(rsf.stack, proj=TRUE)
+res(rsf.stack)
+
+# Convert once more to a named raster.list to use in modeling.  We'll grab anth_risk, fence distance, primary roads, secondary roads, and river distance from the raster stack/brick.
+rsf.list <- list("anth_risk" = raster(rsf.stack[["anth_risk"]]),
+                 "fence" = raster(rsf.stack[["fence_dist"]]),
+                 "prirds" = raster::raster(rsf.stack[["prirds_dist"]]),
+                 "secrds" = raster::raster(rsf.stack[["secrds_dist"]]),
+                 "river" = raster::raster(rsf.stack[["river_dist"]]))
+#rsf.list
+
+# Data load/import.  This data object has two data files, `WB` and `WB.sf`.  Remember that the `WB.sf` file is essentially the same as the `WB` object, except that the data are projected (i.e., the dataset includes geographic coordinates).  For this analyses, we are going to work with the unprojected data with Lat/Long coordinates.  This would be akin to loading data directly from Movebank.
+load("Data/wildebeest_data.rdata")
+
+# Look at the data with lat/long coordinates.  CTMM requires lat/long or UTM coordinates.
+head(WB)
+
+# Load a polygon shapefile of the study area.  File is projected to Albers Equal Area.  For CTMM, we need this to be a spatialpolygonsdataframe.
+Athi.Bound <- st_read("Data/Athi.shp")
+Athi.spdf <- as_Spatial(Athi.Bound) # Convert to spdf
+```
+
+# Create Telemetry Object
+Using the `as.telemetry()` function, create the telemtry object for further analyses.  Plot the data to make sure the movement dataset overlaps with our environmental layers.
+
+```{r Telemetry, message=FALSE, warning=FALSE, echo=TRUE}
+# We already updated to local timezome prior to import.  Specify the timezone when converting to a telemetry object
+Timezone2 <- "Africa/Nairobi"
+# AEA.Africa.proj <- "+proj=aea +lat_1=20 +lat_2=-23 +lat_0=0 +lon_0=25 +x_0=0 +y_0=0 +ellps=WGS84 +datum=WGS84 +units=m +no_defs"
+
+# Convert to a as.telemetry object.  Define the timezone and projection
+# We need to project the data to Albers Equal Area.  We can do this by defining the projection to be the same as our raster data layers or use the AEA.Africa.proj projection defined above.
+wild <- as.telemetry(WB, timezone = TimeZone2, projection = crs(rsf.stack)) 
+
+# Note some very small minimum sampling intervals for each animal.  How many animals in the dataset?
+length(wild)
+
+# Plot the full dataset
+# plot(wild, col=rainbow(length(wild))) 
+
+# Plot the data on top of the raster to verify all is located in the right place
+# Grab one of the animals
+wild.sub <- wild[[4]]
+
+# Set the extent to create limits to the graph
+lims <- extent(Athi.spdf)
+
+plot(wild.sub,
+     error = 2,
+     SP = Athi.spdf,
+     border.SP = "black",
+     xlim = c(lims[1],lims[2]),
+     ylim = c(lims[3], lims[4]),
+     R = rsf.stack[[1]],
+     main = "Wildebeest on Anthropogenic Risk")
+
+# Or convert the as.telemetry object to a move object and plot
+plot(rsf.stack[[1]])
+wild_mv <- mt_as_move2(wild) # Convert to move2 object for plotting
+plot(wild_mv, add = TRUE)
+
+# Let's look at the data
+head(wild[[4]]) # or head(wild.sub)
+```
+
+# Fitting a Model for a Single Animal
+Similar to procedures demonstrated to create a homerange, we will we will first plot a variogram object overlayed with a fitted continuous-time movement model.  The variogram's shape will be guesstimated using the `ctmm.guess()` function.  We will then fit multiple isotropic models and select the model that best fits the data based on AIC.  To speed up the process, we will focus on a single animal. 
+
+## CTMM Select
+Use `ctmm.select()` to specify, fit, and select continuous-time movement models.  This process can take a very long time because the function is fitting multiple models to the data in order to find the best fit.
+
+```{r CTMM Select, message=FALSE, warning=FALSE, echo=TRUE}
+# Select a single animal to investigate
+wild_mv_sub <- subset(wild_mv, track == "Laingoni")
+plot(rsf.stack[[1]], 
+     ext = extent(wild_mv_sub) * 2)
+plot(st_geometry(wild_mv_sub), 
+     add = TRUE, 
+     type = "p", 
+     col = "red", 
+     pch = 19, 
+     cex = 0.5)
+
+# Select this animal from the telemetry object
+DATA <- wild[[4]]
+
+# Select an autocorrelation model, guesstimating shape values of the variogram
+# Note: rsf.fit only uses isotropic models at this time
+GUESS <- ctmm.guess(DATA,
+                    CTMM = ctmm(error=TRUE,
+                                isotropic=TRUE),
+                    interactive=FALSE)
+
+# Fit the best model
+# FIT <- ctmm.select(DATA,
+#                    GUESS,
+#                    trace=3)
+
+# Save the result
+# saveRDS(FIT, file = "Data/wb_iso.rds")
+FIT <- readRDS("Data/wb_iso.rds")
+```
+## CTMM Fit
+Based on the best fitting model, calculate an autocorrelated kernel density estimate (AKDE).  Plot the result and compare with a model that assumes IID. 
+
+```{r CTMM AKDE, message=FALSE, warning=FALSE, echo=TRUE}
+# Define a reference grid by cropping to the extent of our animal of interest
+reference_grid <- crop(rsf.list[["anth_risk"]],
+                       extent(wild_mv_sub) * 2)
+
+# Fit an AKDE (no RSF) model based on the best fit variogram
+# AKDE <- akde(DATA,
+#              FIT,
+#              weights=TRUE, 
+#              grid = reference_grid)
+
+# saveRDS(AKDE, file = "Data/akde.rds")
+AKDE <- readRDS("Data/akde.rds")
+
+# Set the plotting window to accommodate two plots
+par(mfrow=c(1,2))
+
+# Plot the result
+plot(DATA,
+     error = 2,
+     UD = AKDE,
+     R = rsf.stack[[1]],
+     col.grid = NA,
+     main ="AKDE")
+
+# Fit an IID model for comparison
+IID <- ctmm.fit(DATA,
+                CTMM = ctmm(isotropic = TRUE))
+KDE <- akde(DATA,
+            IID, 
+            grid = reference_grid)
+
+# Plot the result                   
+plot(DATA,
+     error = 2,
+     UD = KDE,
+     R = rsf.stack[[1]],
+     col.grid = NA,
+     main = "KDE")
+
+# Reset the plotting window
+par(mfrow=c(1,1))
+
+# Create a raster representation of the akde, for the reference grid
+# PMF is "probability mass function". The values sum up to 1 for the whole grid, and represent for a given pixel the probability of finding the animal in that pixel
+# plot(ctmm::raster(AKDE, DF = "PMF"))
+```
+
+# RSF Fit
+Now that we have selected the best fitting model, we can use the calculate Utilization Distribution with the function `rsf.fit()` to fit an integrated resource selection function (iRSF).  Let's first examine the number of points needed when we ignore (IID) and consider autocorrelation.
+
+iRSFs have a number of advantages compared to regular RSFs, including:
+
+* log-likelihood is down-weighted to account for autocorrelation and irregular sampling
+* available points are randomly sampled until numerical convergence
+* available area is estimated - uncertainty is propagated (iRSF)
+
+```{r Availability, message=FALSE, warning=FALSE, echo=TRUE}
+# Assigned weight without autocorrelation
+plot(DATA$timestamp,
+     mean(KDE$DOF.area) * KDE$weights,
+     xlab='time',
+     ylab="weight")
+
+# How many points do you need for an IID RSF estimate?
+# iRSF without autocorrelation: iterates until the default 1% error threshold
+RSF.IID <- rsf.fit(DATA,
+                   KDE,
+                   R = rsf.list)
+summary(RSF.IID)
+
+# assigned weight with autocorrelation
+plot(DATA$timestamp,
+     mean(AKDE$DOF.area) * AKDE$weights,
+     xlab='time',
+     ylab="weight")
+
+# How many points do you need for a autocorrelation-weighted RSF estimate?
+# iRSF with autocorrelation: iterates until the default 1% error threshold
+RSF <- rsf.fit(DATA,
+               AKDE,
+               R = rsf.list)
+
+# if you don't have a time-dependent model, integrator="Riemann" is much faster
+# RSF <- rsf.fit(DATA,AKDE,R=R,integrator="Riemann")
+summary(RSF)
+```
+
+# Multiple Animals
+More than likely, you will have multiple animals and be interested in population-level responses.  To do so in [CTMM](), you can use `rsf.fit()` on each individual and then use the mean function on the list of `rsf.fit()` objects.

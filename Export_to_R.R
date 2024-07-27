@@ -1,4 +1,4 @@
 # extract R code
 library(knitr)
-file.exists("3b_HomeRange.Rmd")
-purl("3b_HomeRange.Rmd")
+file.exists("1_RSF.Rmd")
+purl("1_RSF.Rmd")
